@@ -26,12 +26,25 @@ class ClipboardUtil {
         simulatePaste()
     }
 
+    /// The user's clipboard as it was before the *first* dictation of a burst.
+    ///
+    /// Two dictations less than `clipboardRestoreDelay` apart used to each save
+    /// their own "original": the second one captured the first transcription and
+    /// later restored that, so the user's real clipboard was lost for good.
+    /// Only the first dictation populates this slot; it is cleared once a
+    /// restore has been attempted. Main-actor only — every caller pastes from
+    /// `IndicatorViewModel`, which is `@MainActor`.
+    private static var pendingOriginalContents: PasteboardContents?
+    private static var pendingRestore: DispatchWorkItem?
+
     /// Pastes text and restores original clipboard (legacy behavior)
     static func insertText(_ text: String) {
         let pasteboard = NSPasteboard.general
 
-        // Save current pasteboard contents
-        let savedContents = saveCurrentPasteboardContents(from: pasteboard)
+        // Capture the user's clipboard only once per burst of dictations.
+        if pendingOriginalContents == nil {
+            pendingOriginalContents = saveCurrentPasteboardContents(from: pasteboard)
+        }
 
         // Set new text to pasteboard
         pasteboard.declareTypes([.string], owner: nil)
@@ -41,15 +54,26 @@ class ClipboardUtil {
         // Simulate Cmd+V using layout-aware keycode resolution
         simulatePaste()
 
+        // A restore scheduled by an earlier dictation would fire against a stale
+        // changeCount and do nothing, so replace it with one for this paste.
+        pendingRestore?.cancel()
+        pendingRestore = nil
+
+        guard pendingOriginalContents != nil else { return }
+
         // Restore original contents only after the target app had a chance to
         // process the paste, and only if the pasteboard still holds our text:
         // a different changeCount means the user (or another app) took over
         // the clipboard and restoring would clobber their data.
-        if let contents = savedContents {
-            DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
-                restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
-            }
+        let work = DispatchWorkItem {
+            let contents = pendingOriginalContents
+            pendingOriginalContents = nil
+            pendingRestore = nil
+            guard let contents else { return }
+            restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
         }
+        pendingRestore = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay, execute: work)
     }
 
     @discardableResult
@@ -195,11 +219,6 @@ class ClipboardUtil {
                 pasteboard.setPropertyList(urls, forType: type)
             }
         }
-    }
-    
-    @available(*, deprecated, renamed: "insertText")
-    static func insertTextUsingPasteboard(_ text: String) {
-        insertText(text)
     }
     
     // MARK: - Testing Helpers

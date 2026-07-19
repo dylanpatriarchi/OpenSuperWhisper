@@ -189,6 +189,108 @@ final class WhisperEngineConversionTests: XCTestCase {
     }
 }
 
+/// Exercises `TranscriptionService.transcribeAudio` end to end — the path the
+/// app actually uses. `WhisperStateIsolationTests` below drives
+/// `MyWhisperContext` directly and so does not cover the service's engine
+/// loading or its serialization of concurrent transcriptions.
+@MainActor
+final class TranscriptionServicePipelineTests: XCTestCase {
+
+    private static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
+    private var savedModelPath: String?
+    private var savedEngine: String?
+
+    override func setUp() {
+        super.setUp()
+        savedModelPath = AppPreferences.shared.selectedWhisperModelPath
+        savedEngine = AppPreferences.shared.selectedEngine
+    }
+
+    override func tearDown() {
+        AppPreferences.shared.selectedWhisperModelPath = savedModelPath
+        AppPreferences.shared.selectedEngine = savedEngine ?? "whisper"
+        super.tearDown()
+    }
+
+    /// Points the shared service at the tiny model and waits for it to load.
+    private func makeLoadedService() async throws -> (TranscriptionService, URL) {
+        let modelURL = Self.repoRoot.appendingPathComponent("ggml-tiny.en.bin")
+        let audioURL = Self.repoRoot.appendingPathComponent("jfk.wav")
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: modelURL.path)
+                && FileManager.default.fileExists(atPath: audioURL.path),
+            "tiny model / jfk sample not present in repo root"
+        )
+
+        AppPreferences.shared.selectedEngine = "whisper"
+        AppPreferences.shared.selectedWhisperModelPath = modelURL.path
+
+        let service = TranscriptionService.shared
+        service.reloadEngine()
+
+        // Engine loading is asynchronous; transcribing before it finishes throws
+        // contextInitializationFailed.
+        let deadline = Date().addingTimeInterval(60)
+        while service.isLoading && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(service.isLoading, "Engine did not finish loading in time")
+
+        return (service, audioURL)
+    }
+
+    func testServiceTranscribesThroughFullPipeline() async throws {
+        let (service, audioURL) = try await makeLoadedService()
+
+        let text = try await service.transcribeAudio(url: audioURL, settings: Settings())
+
+        XCTAssertTrue(
+            text.lowercased().contains("your country"),
+            "Unexpected transcription through TranscriptionService: \(text)"
+        )
+        XCTAssertFalse(service.isTranscribing, "isTranscribing must be cleared when done")
+    }
+
+    /// Recording while the engine is still loading used to be swallowed: the
+    /// service threw contextInitializationFailed and the error was only printed,
+    /// so the user saw nothing at all. Callers now gate on isEngineReady.
+    func testEngineIsNotReadyWhileLoading() async throws {
+        let (service, _) = try await makeLoadedService()
+        XCTAssertTrue(service.isEngineReady, "Engine should be ready once loaded")
+
+        // A path that cannot load leaves the service without an engine.
+        AppPreferences.shared.selectedWhisperModelPath = "/nonexistent/model.bin"
+        service.reloadEngine()
+
+        let deadline = Date().addingTimeInterval(30)
+        while service.isLoading && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertFalse(
+            service.isEngineReady,
+            "Engine must not report ready when no model could be loaded"
+        )
+    }
+
+    /// The indicator and queue flows can both reach `transcribeAudio`; a single
+    /// whisper context must never be entered twice concurrently.
+    func testConcurrentTranscriptionsAreSerializedAndBothSucceed() async throws {
+        let (service, audioURL) = try await makeLoadedService()
+
+        async let first = service.transcribeAudio(url: audioURL, settings: Settings())
+        async let second = service.transcribeAudio(url: audioURL, settings: Settings())
+        let (a, b) = try await (first, second)
+
+        XCTAssertTrue(a.lowercased().contains("your country"), "First run: \(a)")
+        XCTAssertTrue(b.lowercased().contains("your country"), "Second run: \(b)")
+        XCTAssertEqual(a, b, "Serialized runs over the same audio must agree")
+    }
+}
+
 final class WhisperStateIsolationTests: XCTestCase {
 
     private static let repoRoot = URL(fileURLWithPath: #filePath)
@@ -1919,6 +2021,79 @@ final class WhisperModelDownloadTests: XCTestCase {
             WhisperDownloadDelegate.progressFraction(totalBytesWritten: 1500, expectedContentLength: 1000),
             1.0
         )
+    }
+
+    // MARK: - Downloaded content validation
+
+    /// Writes `bytes` followed by enough padding to clear the size floor.
+    private func makeTempFile(head: [UInt8], totalSize: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("model-validation-\(UUID().uuidString).bin")
+        var data = Data(head)
+        if totalSize > data.count {
+            data.append(Data(repeating: 0, count: totalSize - data.count))
+        }
+        try data.write(to: url)
+        return url
+    }
+
+    private let ggmlMagicBytes: [UInt8] = [0x6c, 0x6d, 0x67, 0x67] // 0x67676d6c little-endian
+
+    func testValidateDownloadedModel_validGGMLFile_passes() throws {
+        let url = try makeTempFile(
+            head: ggmlMagicBytes,
+            totalSize: Int(WhisperModelManager.minimumPlausibleModelSize) + 1
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertNoThrow(try WhisperModelManager.validateDownloadedModel(at: url))
+    }
+
+    func testValidateDownloadedModel_htmlErrorPage_isRejected() throws {
+        // The exact failure this guards: a captive portal or CDN interstitial
+        // returns HTTP 200 with a small HTML body.
+        let html = Array("<!DOCTYPE html><html><body>Sign in</body></html>".utf8)
+        let url = try makeTempFile(head: html, totalSize: html.count)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try WhisperModelManager.validateDownloadedModel(at: url)) { error in
+            guard case WhisperModelManager.ModelValidationError.tooSmall = error else {
+                return XCTFail("Expected .tooSmall, got \(error)")
+            }
+        }
+    }
+
+    func testValidateDownloadedModel_largeFileWithWrongMagic_isRejected() throws {
+        let url = try makeTempFile(
+            head: Array("NOTAMODEL".utf8),
+            totalSize: Int(WhisperModelManager.minimumPlausibleModelSize) + 1
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try WhisperModelManager.validateDownloadedModel(at: url)) { error in
+            guard case WhisperModelManager.ModelValidationError.notAGGMLFile = error else {
+                return XCTFail("Expected .notAGGMLFile, got \(error)")
+            }
+        }
+    }
+
+    func testGGMLMagic_matchesRealShippedModel() throws {
+        // Guards the magic constant against drift by checking it against a real
+        // ggml file: the Silero VAD model shipped in the app bundle. (It is well
+        // under `minimumPlausibleModelSize`, so only the magic is asserted here.)
+        let bundle = Bundle(for: WhisperEngine.self)
+        guard let path = bundle.path(forResource: "ggml-silero-v5.1.2", ofType: "bin") else {
+            throw XCTSkip("Silero VAD model not present in the test bundle")
+        }
+        XCTAssertTrue(try WhisperModelManager.hasGGMLMagic(at: URL(fileURLWithPath: path)))
+    }
+
+    func testGGMLMagic_rejectsNonModelFile() throws {
+        let html = Array("<!DOCTYPE html><html></html>".utf8)
+        let url = try makeTempFile(head: html, totalSize: html.count)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertFalse(try WhisperModelManager.hasGGMLMagic(at: url))
     }
 }
 

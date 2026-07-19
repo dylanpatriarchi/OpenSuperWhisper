@@ -59,9 +59,6 @@ final class AppPreferences {
     @UserDefault(key: "fluidAudioModelVersion", defaultValue: "v3")
     var fluidAudioModelVersion: String
     
-    @UserDefault(key: "qwen3Variant", defaultValue: "f32")
-    var qwen3Variant: String
-    
     @UserDefault(key: "whisperLanguage", defaultValue: "en")
     var whisperLanguage: String
     

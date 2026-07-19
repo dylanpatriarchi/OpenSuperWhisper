@@ -142,10 +142,10 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
         -H "Accept: application/vnd.github+json" \
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
-        https://api.github.com/repos/Starmel/OpenSuperWhisper/releases \
+        https://api.github.com/repos/dylanpatriarchi/ItalianSuperWhisper/releases \
         -d '{
             "tag_name": "'${NEW_VERSION}'",
-            "target_commitish": "master",
+            "target_commitish": "main",
             "name": "Release '${NEW_VERSION}'",
             "body": "## OpenSuperWhisper '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using Whisper.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensuperwhisper\n```\n\n### Manual Installation\n1. Download the `OpenSuperWhisper.dmg` file below\n2. Open the DMG and drag OpenSuperWhisper to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
             "draft": false,
@@ -171,7 +171,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         -H "Content-Type: application/octet-stream" \
-        "https://uploads.github.com/repos/Starmel/OpenSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.dmg" \
+        "https://uploads.github.com/repos/dylanpatriarchi/ItalianSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.dmg" \
         --data-binary @"${DMG_PATH}")
     
     # Check if upload was successful
@@ -198,7 +198,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -H "Content-Type: application/zip" \
-            "https://uploads.github.com/repos/Starmel/OpenSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.app.dSYM.zip" \
+            "https://uploads.github.com/repos/dylanpatriarchi/ItalianSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.app.dSYM.zip" \
             --data-binary @"${DSYM_ZIP_PATH}")
         
         # Check dSYM upload
@@ -217,12 +217,12 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
     
     echo "✅ DMG uploaded successfully!"
     echo "🎉 GitHub release is complete!"
-    echo "🔗 Release URL: https://github.com/Starmel/OpenSuperWhisper/releases/tag/${NEW_VERSION}"
+    echo "🔗 Release URL: https://github.com/dylanpatriarchi/ItalianSuperWhisper/releases/tag/${NEW_VERSION}"
 else
     echo "⚠️ Skipping GitHub release creation (no token provided)"
     echo "📋 Manual steps needed:"
     echo "1. Create GitHub release at:"
-    echo "   https://github.com/Starmel/OpenSuperWhisper/releases/new?tag=${NEW_VERSION}"
+    echo "   https://github.com/dylanpatriarchi/ItalianSuperWhisper/releases/new?tag=${NEW_VERSION}"
     echo "2. Upload the DMG file: OpenSuperWhisper.dmg"
 fi
 
@@ -243,10 +243,10 @@ cask "opensuperwhisper" do
   version "${NEW_VERSION}"
   sha256 "${SHA256}"
 
-  url "https://github.com/starmel/OpenSuperWhisper/releases/download/#{version}/OpenSuperWhisper.dmg"
+  url "https://github.com/dylanpatriarchi/ItalianSuperWhisper/releases/download/#{version}/OpenSuperWhisper.dmg"
   name "OpenSuperWhisper"
   desc "Whisper dictation/transcription app"
-  homepage "https://github.com/starmel/OpenSuperWhisper"
+  homepage "https://github.com/dylanpatriarchi/ItalianSuperWhisper"
 
   depends_on macos: ">= :sonoma"
   depends_on arch: :arm64

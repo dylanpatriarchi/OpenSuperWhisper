@@ -2,6 +2,8 @@
 
 OpenSuperWhisper is a macOS application that provides real-time audio transcription using the Whisper model. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
 
+> **This is a fork** of [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) with a set of correctness fixes applied on top. See [Fixes in this fork](#fixes-in-this-fork). Transcription is fully on-device — there is no API key and no network inference; the network is used only to download models.
+
 <p align="center">
 <img src="docs/image.png" width="400" /> <img src="docs/image_indicator.png" width="400" />
 </p>
@@ -20,12 +22,16 @@ OpenSuperWhisper is a macOS application that provides real-time audio transcript
 
 ## Installation
 
+The Homebrew formula and the releases page below install **upstream**, not this fork:
+
 ```shell
 brew update # Optional
 brew install opensuperwhisper
 ```
 
 Or from [GitHub releases page](https://github.com/Starmel/OpenSuperWhisper/releases).
+
+To run this fork, build it locally — see [Building locally](#building-locally).
 
 ## Requirements
 
@@ -40,17 +46,52 @@ If you encounter any issues or have questions, please:
 
 ## Building locally
 
-To build locally, you'll need:
+You need the **full Xcode**, not just the Command Line Tools — the build uses
+`xcodebuild` against `OpenSuperWhisper.xcodeproj`. Check with `xcodebuild -version`;
+if it reports that it requires Xcode, point the toolchain at it:
 
-    git clone git@github.com:Starmel/OpenSuperWhisper.git
+    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+Then:
+
+    git clone git@github.com:dylanpatriarchi/OpenSuperWhisper.git
     cd OpenSuperWhisper
     git submodule update --init --recursive
     brew install cmake libomp rust ruby
     gem install xcpretty
     ./run.sh build
 
+The submodule step is not optional: without it `libwhisper/whisper.cpp` is empty and
+the link fails with `library 'ggml-metal' not found`.
+
+The built app is unsigned. macOS will not let you grant it Accessibility (needed for
+the global hotkey and auto-paste) until it carries a signature, so sign it ad-hoc:
+
+    codesign --force --sign - \
+      --entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements \
+      build/Build/Products/Debug/OpenSuperWhisper.app
+
 In case of problems, consult `.github/workflows/build.yml` which is our CI workflow
 where the app gets built automatically on GitHub's CI.
+
+## Fixes in this fork
+
+Applied in [#1](https://github.com/dylanpatriarchi/OpenSuperWhisper/pull/1):
+
+- **Cancelling a transcription now works.** The cancellation flag was set and cleared
+  in the same call, and the Parakeet engine never stored its task, so cancelling left
+  the workload running to completion.
+- **Two transcriptions can no longer enter one whisper context concurrently.**
+- **The progress callback can no longer outlive the object it points at**, which could
+  free memory still referenced by whisper.cpp.
+- **Corrupt model downloads are rejected.** Previously only the HTTP status was checked,
+  so an error page could be stored as a model and reported as installed forever.
+- **Back-to-back dictations no longer destroy the clipboard**, which used to be restored
+  to the *previous transcription* instead of the user's own contents.
+- **Recording before the model has loaded now says so** instead of silently discarding
+  the dictation.
+- Event taps no longer leak a mach port on every hotkey settings change.
+- `run.sh` no longer reports success when the build actually failed.
 
 ## Contributing
 

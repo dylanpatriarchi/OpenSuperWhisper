@@ -35,6 +35,9 @@ class IndicatorViewModel: ObservableObject {
     private var blinkTimer: Timer?
     private var hideTimer: Timer?
     private var confirmCancelTimer: Timer?
+    /// Held so that cancelling can actually stop the work. Without a reference
+    /// the task runs to completion after the user has dismissed the indicator.
+    private var decodingTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     
     private let recordingStore: RecordingStore
@@ -160,10 +163,13 @@ class IndicatorViewModel: ObservableObject {
     /// error path falls back to what the engine transcribed.
     private func reformulateIfEnabled(_ text: String) async -> String {
         guard AppPreferences.shared.reformulationEnabled else { return text }
+        guard !Task.isCancelled else { return text }
 
         state = .reformulating
         do {
             return try await ReformulationService.shared.reformulate(text)
+        } catch is CancellationError {
+            return text
         } catch {
             print("Reformulation failed, keeping the raw transcription: \(error)")
             return text
@@ -192,10 +198,10 @@ class IndicatorViewModel: ObservableObject {
         }
         
         state = .decoding
-        
-        Task { [weak self] in
+
+        decodingTask = Task { [weak self] in
             guard let self = self else { return }
-            
+
             if let tempURL = await self.recorder.stopRecording() {
                 do {
                     print("start decoding...")
@@ -225,14 +231,37 @@ class IndicatorViewModel: ObservableObject {
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-                        
-                        await MainActor.run {
-                            self.recordingStore.addRecording(newRecording)
+
+                        // Cancelling used to be cosmetic: the window went away but
+                        // this task kept running and still pasted its result into
+                        // whatever the user was doing next. Reformulation made that
+                        // window seconds long, so check before touching anything.
+                        try Task.checkCancellation()
+
+                        // Awaited, not fire-and-forget. addRecording swallows write
+                        // failures into a print, which would let us paste a rewrite
+                        // whose raw text was never stored anywhere.
+                        do {
+                            try await self.recordingStore.addRecordingSync(newRecording)
+                        } catch {
+                            // The audio file has already been moved into place, so
+                            // the dictation is not lost — but the history row is.
+                            print("""
+                                Failed to save the recording: \(error)
+                                The audio is at \(newRecording.url.path); \
+                                raw transcription: \(newRecording.rawTranscription ?? text)
+                                """)
                         }
-                        
+
                         insertText(text)
                         print("Transcription result: \(text)")
                     }
+                } catch is CancellationError {
+                    // The user asked for this to go away. Say nothing, paste
+                    // nothing; the audio file stays where the successful path
+                    // left it, or gets cleaned up below if it never moved.
+                    try? FileManager.default.removeItem(at: tempURL)
+                    print("Dictation cancelled by the user")
                 } catch {
                     print("Error transcribing audio: \(error)")
                     try? FileManager.default.removeItem(at: tempURL)
@@ -304,12 +333,18 @@ class IndicatorViewModel: ObservableObject {
         recordingStartedAt = nil
         hideTimer?.invalidate()
         hideTimer = nil
+        decodingTask?.cancel()
+        decodingTask = nil
         cancellables.removeAll()
     }
 
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
+        // Stops transcription/reformulation already in flight, not just the mic.
+        decodingTask?.cancel()
+        decodingTask = nil
+        transcriptionService.cancelTranscription()
         recorder.cancelRecording()
     }
 }

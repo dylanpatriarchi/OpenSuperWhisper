@@ -62,6 +62,10 @@ final class ReformulationService: ObservableObject {
         alcuna premessa.
         """
 
+    /// Rewrites shorter than this are never rejected for length. Below it, the
+    /// "3× the input" rule is too tight to mean anything.
+    static let shortDictationAllowance = 120
+
     /// Deterministic decoding: this is a rewriting task, so sampling would only
     /// add variation we do not want.
     private static let generateParameters = GenerateParameters(
@@ -133,7 +137,13 @@ final class ReformulationService: ObservableObject {
             }
         }
 
-        if cleaned.count >= 2, cleaned.hasPrefix("\""), cleaned.hasSuffix("\"") {
+        // Typographic quotes too: models reach for “ ” at least as often as ",
+        // and an unstripped pair ends up pasted into the user's document.
+        let openingQuotes: Set<Character> = ["\"", "\u{201C}", "\u{201D}", "\u{00AB}"]
+        let closingQuotes: Set<Character> = ["\"", "\u{201D}", "\u{201C}", "\u{00BB}"]
+        if cleaned.count >= 2,
+           let first = cleaned.first, let last = cleaned.last,
+           openingQuotes.contains(first), closingQuotes.contains(last) {
             cleaned = String(cleaned.dropFirst().dropLast())
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -142,8 +152,13 @@ final class ReformulationService: ObservableObject {
 
         // A rewrite is roughly the length of the input. Something far longer is
         // the model having answered the dictation rather than cleaning it.
+        //
+        // The floor matters: on a two-word dictation, 3× is a handful of
+        // characters, and a perfectly good rewrite ("10" → "Sono le dieci.")
+        // would be thrown away for being "too long".
         let originalLength = original.trimmingCharacters(in: .whitespacesAndNewlines).count
-        if originalLength > 0, cleaned.count > originalLength * 3 {
+        let lengthCeiling = max(originalLength * 3, Self.shortDictationAllowance)
+        if originalLength > 0, cleaned.count > lengthCeiling {
             return original
         }
 

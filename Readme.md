@@ -1,23 +1,21 @@
-# OpenSuperWhisper 🇮🇹
+# ItalianSuperWhisper 🇮🇹
 
 **Dettatura vocale per macOS, con l'italiano come lingua di riferimento.**
 
-A macOS dictation app built around Italian. It transcribes locally, on your Mac — there is
-no API key and no network inference; the network is used only to download models.
+Premi una scorciatoia, parli, e il testo viene scritto nell'app che hai davanti.
+Tutto avviene **sul tuo Mac**: nessuna chiave API, nessuna inferenza in rete. La rete
+serve soltanto a scaricare i modelli la prima volta.
 
-> **Fork** di [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper).
-> L'upstream è un'app multilingua generalista; **questo fork ha l'italiano come focus** —
-> vedi [Focus sull'italiano](#focus-sullitaliano) e [Fixes in this fork](#fixes-in-this-fork).
+Fork di [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper), che è
+un'app multilingua generalista. Qui il baricentro è l'italiano.
 
-<p align="center">
-<img src="docs/image.png" width="400" /> <img src="docs/image_indicator.png" width="400" />
-</p>
+---
 
 ## Focus sull'italiano
 
-Questo fork è pensato per **chi detta in italiano**. Non significa che le altre lingue
-siano state rimosse — Whisper e Parakeet continuano a supportarle tutte, e restano
-selezionabili. Significa che **le scelte di prodotto vengono fatte guardando l'italiano**.
+Non significa che le altre lingue siano state rimosse: Whisper e Parakeet continuano a
+supportarle tutte e restano selezionabili. Significa che **le scelte di prodotto vengono
+fatte guardando l'italiano**.
 
 In concreto:
 
@@ -27,148 +25,180 @@ In concreto:
 - **Niente logica specifica per lingue asiatiche.** L'autocorrect CJK dell'upstream
   (spaziatura fra caratteri cinesi/giapponesi e latini, punteggiatura full-width) è stato
   rimosso: non si applica all'italiano e trascinava l'intera toolchain Rust nel build.
-- **Autocorrect italiano a bassa latenza** *(fatto)* — `ItalianTextCorrector` applica
-  correzioni deterministiche su ogni dettatura: nessuna chiamata a un modello, quindi
-  costo in microsecondi. Contiene **solo regole sempre-vere**: accenti la cui forma
-  senza accento non è una parola italiana (`perche` → `perché`, `piu` → `più`,
-  `citta` → `città`), grafie mai corrette (`pò` → `po'`, `qual'è` → `qual è`,
-  `daccordo` → `d'accordo`) e spazi prima della punteggiatura.
-  Tutto ciò che richiede contesto è **escluso di proposito**: `e`/`è`, `si`/`sì`,
-  `la`/`là`, `da`/`dà` hanno due grafie entrambe valide, e una regola cieca
-  cambierebbe il significato della frase. Quel lavoro spetta al livello LLM.
-- **In arrivo:**
-  - **Riformulazione con LLM locale** — livello separato e opzionale, per ripulire le
-    autocorrezioni del parlato. Da *"domani alle 10 non ci sarò, ah no, non è vero, alle
-    10.30"* a *"domani non ci sarò alle 10.30"*. Whisper e Parakeet sono modelli di
-    trascrizione: riportano fedelmente quello che hai detto e non faranno mai questo
-    lavoro. Serve un modello a parte, anch'esso in locale.
+- **Correzione automatica dell'italiano**, descritta qui sotto.
 
-In entrambi i casi vale una regola: **il testo grezzo viene sempre conservato** accanto a
-quello corretto. Alterare in silenzio quello che hai dettato è peggio che non fare nulla.
+## Le due correzioni
 
-## Features
+Il testo che esce dal modello passa per due livelli, deliberatamente separati.
 
-- 🎙️ Real-time audio recording and transcription
-- 🧠 Two transcription engines: [Whisper](https://github.com/ggerganov/whisper.cpp) and [Parakeet](https://github.com/AntinomyCollective/FluidAudio) — download models directly from the app
-- ⌨️ Global keyboard shortcuts — key combination or single modifier key (e.g. Left ⌘, Right ⌥, Fn)
-- 🖱️ Mouse button trigger — bind the middle or an extra (thumb) mouse button to start/stop recording
-- ✊ Hold-to-record mode — hold the shortcut, modifier key or mouse button to record, release to stop
-- 📁 Drag & drop audio files for transcription with queue processing
-- 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
-- 🌍 Multiple languages with auto-detection — Italian is the focus, not a restriction
+### 1. Correttore deterministico — attivo
 
-## Installation
+`ItalianTextCorrector` gira su **ogni** dettatura. Non fa chiamate a modelli, quindi costa
+microsecondi e non ha niente da configurare.
 
-The Homebrew formula and the releases page below install **upstream**, not this fork:
+Contiene **solo regole sempre vere**:
+
+- accenti la cui forma non accentata non è una parola italiana:
+  `perche` → `perché`, `piu` → `più`, `puo` → `può`, `citta` → `città`
+- grafie mai corrette: `pò` → `po'`, `qual'è` → `qual è`, `daccordo` → `d'accordo`,
+  `un'altro` → `un altro`
+- spazi prima della punteggiatura e spazi doppi
+
+Tutto ciò che richiede contesto è **escluso di proposito**. `e`/`è`, `si`/`sì`, `la`/`là`,
+`da`/`dà`, `ne`/`né`, `se`/`sé` hanno due grafie entrambe valide: una regola cieca
+cambierebbe il significato della frase. Per lo stesso motivo sono fuori dalla tabella degli
+accenti anche `pero` (l'albero), `meta` (l'obiettivo), `giacche` (i giubbotti), `te` (il
+pronome) ed `eta` (la lettera greca).
+
+Si attiva quando la lingua è impostata **esplicitamente** su italiano, non su "auto": con
+"auto" la lingua non è nota e queste regole non devono girare su altre lingue.
+
+### 2. Riformulazione con LLM locale — in sviluppo
+
+Livello separato e opzionale, per ripulire le autocorrezioni del parlato. Da
+*"domani alle 10 non ci sarò, ah no, non è vero, alle 10.30"* a
+*"domani non ci sarò alle 10.30"*.
+
+Whisper e Parakeet sono modelli di **trascrizione**: riportano fedelmente quello che hai
+detto e non faranno mai questo lavoro. Serve un modello a parte, anch'esso in locale.
+
+Non è ancora nell'app: il lavoro è sul branch `wip/llm-reformulation`.
+
+> **Regola valida per entrambi i livelli:** il testo grezzo viene sempre conservato accanto
+> a quello corretto. Alterare in silenzio quello che hai dettato è peggio che non fare
+> nulla.
+
+## Funzionalità
+
+- Registrazione e trascrizione in locale
+- Due motori: [Whisper](https://github.com/ggerganov/whisper.cpp) e
+  [Parakeet](https://github.com/AntinomyCollective/FluidAudio), con download dei modelli
+  dall'app
+- Scorciatoia globale — combinazione di tasti oppure singolo modificatore (⌘ sinistro,
+  ⌥ destro, Fn…)
+- Trigger da mouse — tasto centrale o tasti laterali del pollice
+- Modalità premi-e-tieni: tieni premuto per registrare, rilascia per fermare
+- Trascina e rilascia file audio, con coda di elaborazione
+- Scelta del microfono: integrato, esterno, Bluetooth, iPhone (Continuity)
+- Più lingue con rilevamento automatico — l'italiano è il focus, non un vincolo
+
+## Requisiti
+
+- macOS 14 o successivo
+- Mac Apple Silicon (ARM64)
+
+## Come farlo girare
+
+### 1. Xcode completo
+
+Serve **Xcode**, non solo i Command Line Tools: il build usa `xcodebuild` sul progetto
+`OpenSuperWhisper.xcodeproj`. Verifica con `xcodebuild -version`; se risponde che serve
+Xcode, indirizza la toolchain:
 
 ```shell
-brew update # Optional
-brew install opensuperwhisper
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
-Or from [GitHub releases page](https://github.com/Starmel/OpenSuperWhisper/releases).
+### 2. Dipendenze di build
 
-To run this fork, build it locally — see [Building locally](#building-locally).
+```shell
+brew install cmake libomp ruby
+gem install xcpretty
+```
 
-## Requirements
+`xcpretty` è opzionale: serve solo a rendere leggibile l'output del build.
 
-- macOS (Apple Silicon/ARM64)
+### 3. Clona e compila
 
-## Support
+```shell
+git clone git@github.com:dylanpatriarchi/ItalianSuperWhisper.git
+cd ItalianSuperWhisper
+git submodule update --init --recursive
+./run.sh build
+```
 
-If you encounter any issues or have questions, please:
-1. Check the existing issues in the repository
-2. Create a new issue with detailed information about your problem
-3. Include system information and logs when reporting bugs
+Il passo dei submodule **non è opzionale**: senza, `libwhisper/whisper.cpp` resta vuoto e
+il link fallisce con `library 'ggml-metal' not found`.
 
-## Building locally
+### 4. Firma l'app
 
-You need the **full Xcode**, not just the Command Line Tools — the build uses
-`xcodebuild` against `OpenSuperWhisper.xcodeproj`. Check with `xcodebuild -version`;
-if it reports that it requires Xcode, point the toolchain at it:
+Il build produce un'app non firmata, e macOS non ti lascia concedere i permessi di
+Accessibilità (necessari per la scorciatoia globale e per incollare il testo) finché non ha
+una firma. Firmala ad-hoc:
 
-    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```shell
+codesign --force --sign - \
+  --entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements \
+  build/Build/Products/Debug/OpenSuperWhisper.app
+```
 
-Then:
+### 5. Avvia
 
-    git clone git@github.com:dylanpatriarchi/OpenSuperWhisper.git
-    cd OpenSuperWhisper
-    git submodule update --init --recursive
-    brew install cmake libomp ruby
-    gem install xcpretty
-    ./run.sh build
+```shell
+open build/Build/Products/Debug/OpenSuperWhisper.app
+```
 
-The submodule step is not optional: without it `libwhisper/whisper.cpp` is empty and
-the link fails with `library 'ggml-metal' not found`.
+Al primo avvio dovrai concedere **Accessibilità** e **Microfono** in Impostazioni di
+Sistema, e scaricare un modello dalle impostazioni dell'app.
 
-The built app is unsigned. macOS will not let you grant it Accessibility (needed for
-the global hotkey and auto-paste) until it carries a signature, so sign it ad-hoc:
+In caso di problemi, `.github/workflows/build.yml` è il workflow di CI e mostra la
+sequenza esatta che gira automaticamente a ogni push.
 
-    codesign --force --sign - \
-      --entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements \
-      build/Build/Products/Debug/OpenSuperWhisper.app
+## Modelli
 
-In case of problems, consult `.github/workflows/build.yml` which is our CI workflow
-where the app gets built automatically on GitHub's CI.
+Per l'italiano serve un modello **multilingue**: quelli con suffisso `.en`
+(`tiny.en`, `base.en`…) sono solo inglese.
 
-## Fixes in this fork
+Dalle impostazioni dell'app:
 
-Applied in [#1](https://github.com/dylanpatriarchi/OpenSuperWhisper/pull/1):
+- **Turbo V3 large** (~1,6 GB) — default ragionevole, buona resa in italiano
+- **Parakeet v3** — più leggero e veloce, supporta anch'esso l'italiano
 
-- **Cancelling a transcription now works.** The cancellation flag was set and cleared
-  in the same call, and the Parakeet engine never stored its task, so cancelling left
-  the workload running to completion.
-- **Two transcriptions can no longer enter one whisper context concurrently.**
-- **The progress callback can no longer outlive the object it points at**, which could
-  free memory still referenced by whisper.cpp.
-- **Corrupt model downloads are rejected.** Previously only the HTTP status was checked,
-  so an error page could be stored as a model and reported as installed forever.
-- **Back-to-back dictations no longer destroy the clipboard**, which used to be restored
-  to the *previous transcription* instead of the user's own contents.
-- **Recording before the model has loaded now says so** instead of silently discarding
-  the dictation.
-- Event taps no longer leak a mach port on every hotkey settings change.
-- `run.sh` no longer reports success when the build actually failed.
+Entrambi i motori sono nell'app: puoi confrontarli sulla tua voce e tenere quello che ti
+rende meglio.
+
+I modelli Whisper si possono anche scaricare a mano dal
+[repository Hugging Face di whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+e mettere nella cartella dei modelli dell'app.
+
+## Correzioni rispetto all'upstream
+
+Applicate in [#1](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/1):
+
+- **L'annullamento di una trascrizione ora funziona.** Il flag di cancellazione veniva
+  impostato e subito riazzerato nella stessa chiamata, e il motore Parakeet non salvava mai
+  il proprio task: annullare lasciava il lavoro in esecuzione fino alla fine.
+- **Due trascrizioni non possono più entrare nello stesso contesto whisper in parallelo.**
+- **La callback di progresso non può più sopravvivere all'oggetto che punta**, che poteva
+  liberare memoria ancora referenziata da whisper.cpp.
+- **I modelli scaricati vengono validati.** Prima si controllava solo lo stato HTTP: una
+  pagina di errore poteva essere salvata come modello e risultare installata per sempre.
+- **Due dettature ravvicinate non distruggono più la clipboard**, che veniva ripristinata
+  alla *trascrizione precedente* invece che al contenuto dell'utente.
+- **Registrare prima che il modello sia carico ora lo dice**, invece di scartare la
+  dettatura in silenzio.
+- Gli event tap non perdono più una mach port a ogni cambio di scorciatoia.
+- `run.sh` non riporta più successo quando il build è fallito.
 
 ## Roadmap
 
-Questo fork:
-
 - [x] Rimozione dell'autocorrect CJK e della toolchain Rust dal build
-- [x] **Autocorrect italiano a bassa latenza** — `ItalianTextCorrector`: accenti non
-      ambigui, apostrofi, spaziatura. Deterministico, nessun modello, solo regole
-      sempre-vere; le ambiguità (`e`/`è`, `si`/`sì`) sono lasciate al livello LLM
-- [ ] **Riformulazione con LLM locale** — rimozione delle autocorrezioni del parlato,
-      opzionale e dietro toggle, con il testo grezzo sempre conservato
-- [ ] Confronto Whisper vs Parakeet sull'italiano, per capire quale tenere come default
+- [x] Correttore italiano deterministico a bassa latenza
+- [ ] Riformulazione con LLM locale
+- [ ] Conservazione del testo grezzo nel database, accanto a quello corretto
+- [ ] Confronto Whisper vs Parakeet sull'italiano per scegliere il default
 
 Ereditati dall'upstream:
 
-- [ ] Streaming transcription
-- [ ] Custom dictionary / keyword boosting ([#19](https://github.com/Starmel/OpenSuperWhisper/issues/19))
-- [ ] Intel macOS compatibility ([#15](https://github.com/Starmel/OpenSuperWhisper/issues/15))
-- [ ] Agent mode ([#14](https://github.com/Starmel/OpenSuperWhisper/issues/14))
-- [x] Background app ([#8](https://github.com/Starmel/OpenSuperWhisper/issues/8))
-- [x] Support long-press single key audio recording ([#18](https://github.com/Starmel/OpenSuperWhisper/issues/18))
+- [ ] Trascrizione in streaming
+- [ ] Dizionario personalizzato / keyword boosting
+- [ ] Compatibilità con Mac Intel
+- [ ] Modalità agente
 
-## Contributing
+## Contribuire
 
-Contributions are welcome! Please feel free to submit pull requests or create issues for bugs and feature requests.
+Pull request e issue sono benvenute.
 
-## License
+## Licenza
 
-OpenSuperWhisper is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Whisper Models
-
-You can download Whisper model files (`.bin`) from the [Whisper.cpp Hugging Face repository](https://huggingface.co/ggerganov/whisper.cpp/tree/main). Place the downloaded `.bin` files in the app's models directory. On first launch, the app will attempt to copy a default model automatically, but you can add more models manually.
-
-**Per l'italiano** serve un modello *multilingue*: i modelli `.en` (`tiny.en`, `base.en`…)
-sono solo inglese. Dalle impostazioni, **"Turbo V3 large"** è un default ragionevole
-(~1.6 GB). **"Parakeet v3"** supporta anch'esso l'italiano ed è più leggero e veloce.
-Entrambi i motori sono nell'app, quindi puoi confrontarli sulla tua voce e tenere quello
-che ti rende meglio.
-
-### Hebrew (ivrit.ai)
-
-For Hebrew transcription, download the **"Turbo V3 Hebrew"** model from Settings → Model. It is [ivrit.ai](https://www.ivrit.ai/)'s Hebrew fine-tune of `whisper-large-v3-turbo` ([whisper-large-v3-turbo-ggml](https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml)) — the same base model as the other "Turbo V3" entries, but tuned for Hebrew. Selecting it automatically sets the input language to Hebrew, which these models require to be set explicitly.
+MIT. Vedi il file [LICENSE](LICENSE).

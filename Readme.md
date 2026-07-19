@@ -193,8 +193,8 @@ Applicate in [#1](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/1)
 
 - [x] Rimozione dell'autocorrect CJK e della toolchain Rust dal build
 - [x] Correttore italiano deterministico a bassa latenza
-- [ ] Riformulazione con LLM locale
-- [ ] Conservazione del testo grezzo nel database, accanto a quello corretto
+- [x] Riformulazione con LLM locale, opzionale e automatica una volta attiva
+- [x] Conservazione del testo grezzo nel database, accanto a quello corretto
 - [ ] Confronto Whisper vs Parakeet sull'italiano per scegliere il default
 
 Ereditati dall'upstream:

@@ -53,16 +53,25 @@ pronome) ed `eta` (la lettera greca).
 Si attiva quando la lingua è impostata **esplicitamente** su italiano, non su "auto": con
 "auto" la lingua non è nota e queste regole non devono girare su altre lingue.
 
-### 2. Riformulazione con LLM locale — in sviluppo
+### 2. Riformulazione con LLM locale — opzionale
 
-Livello separato e opzionale, per ripulire le autocorrezioni del parlato. Da
+Livello separato e disattivato di default, per ripulire le autocorrezioni del parlato. Da
 *"domani alle 10 non ci sarò, ah no, non è vero, alle 10.30"* a
 *"domani non ci sarò alle 10.30"*.
 
 Whisper e Parakeet sono modelli di **trascrizione**: riportano fedelmente quello che hai
-detto e non faranno mai questo lavoro. Serve un modello a parte, anch'esso in locale.
+detto e non faranno mai questo lavoro. Serve un modello a parte, anch'esso in locale
+(Gemma 4 E2B via MLX).
 
-Non è ancora nell'app: il lavoro è sul branch `wip/llm-reformulation`.
+Si attiva da **Impostazioni → Transcription → Riformulazione**. Una volta attiva è
+automatica: gira su ogni dettatura, senza nessun gesto in più. Da sapere prima di
+accenderla:
+
+- alla prima dettatura scarica un modello di alcuni GB;
+- ogni dettatura richiede qualche secondo in più;
+- il testo grezzo viene salvato nel database accanto a quello riscritto, e ogni errore
+  del modello (mancato caricamento, risposta vuota, risposta fuori tema) fa ricadere
+  sulla trascrizione originale. Una riformulazione fallita non ti costa la dettatura.
 
 > **Regola valida per entrambi i livelli:** il testo grezzo viene sempre conservato accanto
 > a quello corretto. Alterare in silenzio quello che hai dettato è peggio che non fare

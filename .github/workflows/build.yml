@@ -14,6 +14,10 @@ jobs:
           submodules: recursive
       - name: Install dependencies
         run: brew install cmake libomp
+      # MLX compiles Metal shaders, which the runner's Xcode does not ship with.
+      # Without this the build fails with "cannot execute tool 'metal'".
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Set up Ruby (for xcpretty)
         uses: ruby/setup-ruby@v1
         with:

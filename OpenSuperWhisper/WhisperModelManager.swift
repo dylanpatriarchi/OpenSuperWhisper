@@ -63,10 +63,63 @@ class WhisperDownloadDelegate: NSObject, URLSessionTaskDelegate, URLSessionDownl
 
 class WhisperModelManager {
     static let shared = WhisperModelManager()
-    
+
     private let modelsDirectoryName = "whisper-models"
     private var activeDownloadTasks: [String: URLSessionDownloadTask] = [:]
     private let downloadTasksLock = NSLock()
+
+    /// whisper.cpp's `GGML_FILE_MAGIC`, stored little-endian at the head of every
+    /// ggml model file.
+    static let ggmlFileMagic: UInt32 = 0x6767_6d6c
+
+    /// Smallest plausible whisper model. Captive-portal interstitials, CDN error
+    /// pages and Git-LFS pointer files are all well under this and would
+    /// otherwise sail through the HTTP status check.
+    static let minimumPlausibleModelSize: Int64 = 1_000_000
+
+    enum ModelValidationError: LocalizedError {
+        case tooSmall(Int64)
+        case notAGGMLFile
+
+        var errorDescription: String? {
+            switch self {
+            case .tooSmall(let bytes):
+                return "The downloaded file is only \(bytes) bytes. The server most likely returned an error page instead of the model. Please try again."
+            case .notAGGMLFile:
+                return "The downloaded file is not a valid GGML model — the download may have been intercepted or corrupted. Please try again."
+            }
+        }
+    }
+
+    /// Rejects a download whose *content* is not a model, even though the HTTP
+    /// status was 200. Without this a few hundred bytes of HTML get stored as
+    /// `ggml-large-v3.bin`, `isModelDownloaded(name:)` reports `true` forever and
+    /// the user has no way to recover short of deleting the file by hand.
+    static func validateDownloadedModel(at url: URL) throws {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        guard size >= minimumPlausibleModelSize else {
+            throw ModelValidationError.tooSmall(size)
+        }
+
+        guard try hasGGMLMagic(at: url) else {
+            throw ModelValidationError.notAGGMLFile
+        }
+    }
+
+    /// Whether the file begins with `GGML_FILE_MAGIC`. Split out from the size
+    /// check so it can be exercised against small-but-valid ggml files such as
+    /// the bundled Silero VAD model.
+    static func hasGGMLMagic(at url: URL) throws -> Bool {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        guard let head = try handle.read(upToCount: 4), head.count == 4 else {
+            return false
+        }
+        let magic = head.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+        return UInt32(littleEndian: magic) == ggmlFileMagic
+    }
     
     var modelsDirectory: URL {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -192,7 +245,19 @@ class WhisperModelManager {
                 }
                 
                 do {
-                    print("Download completed. Moving file to destination...")
+                    print("Download completed. Validating...")
+                    do {
+                        try Self.validateDownloadedModel(at: location)
+                    } catch {
+                        // Never let a non-model file reach the models directory:
+                        // it would be reported as installed from then on.
+                        try? FileManager.default.removeItem(at: location)
+                        print("Downloaded file failed validation: \(error)")
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    print("Moving file to destination...")
                     try FileManager.default.moveItem(at: location, to: destinationURL)
                     print("Model successfully saved to: \(destinationURL.path)")
                     

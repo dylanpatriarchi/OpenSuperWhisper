@@ -1920,6 +1920,79 @@ final class WhisperModelDownloadTests: XCTestCase {
             1.0
         )
     }
+
+    // MARK: - Downloaded content validation
+
+    /// Writes `bytes` followed by enough padding to clear the size floor.
+    private func makeTempFile(head: [UInt8], totalSize: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("model-validation-\(UUID().uuidString).bin")
+        var data = Data(head)
+        if totalSize > data.count {
+            data.append(Data(repeating: 0, count: totalSize - data.count))
+        }
+        try data.write(to: url)
+        return url
+    }
+
+    private let ggmlMagicBytes: [UInt8] = [0x6c, 0x6d, 0x67, 0x67] // 0x67676d6c little-endian
+
+    func testValidateDownloadedModel_validGGMLFile_passes() throws {
+        let url = try makeTempFile(
+            head: ggmlMagicBytes,
+            totalSize: Int(WhisperModelManager.minimumPlausibleModelSize) + 1
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertNoThrow(try WhisperModelManager.validateDownloadedModel(at: url))
+    }
+
+    func testValidateDownloadedModel_htmlErrorPage_isRejected() throws {
+        // The exact failure this guards: a captive portal or CDN interstitial
+        // returns HTTP 200 with a small HTML body.
+        let html = Array("<!DOCTYPE html><html><body>Sign in</body></html>".utf8)
+        let url = try makeTempFile(head: html, totalSize: html.count)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try WhisperModelManager.validateDownloadedModel(at: url)) { error in
+            guard case WhisperModelManager.ModelValidationError.tooSmall = error else {
+                return XCTFail("Expected .tooSmall, got \(error)")
+            }
+        }
+    }
+
+    func testValidateDownloadedModel_largeFileWithWrongMagic_isRejected() throws {
+        let url = try makeTempFile(
+            head: Array("NOTAMODEL".utf8),
+            totalSize: Int(WhisperModelManager.minimumPlausibleModelSize) + 1
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try WhisperModelManager.validateDownloadedModel(at: url)) { error in
+            guard case WhisperModelManager.ModelValidationError.notAGGMLFile = error else {
+                return XCTFail("Expected .notAGGMLFile, got \(error)")
+            }
+        }
+    }
+
+    func testGGMLMagic_matchesRealShippedModel() throws {
+        // Guards the magic constant against drift by checking it against a real
+        // ggml file: the Silero VAD model shipped in the app bundle. (It is well
+        // under `minimumPlausibleModelSize`, so only the magic is asserted here.)
+        let bundle = Bundle(for: WhisperEngine.self)
+        guard let path = bundle.path(forResource: "ggml-silero-v5.1.2", ofType: "bin") else {
+            throw XCTSkip("Silero VAD model not present in the test bundle")
+        }
+        XCTAssertTrue(try WhisperModelManager.hasGGMLMagic(at: URL(fileURLWithPath: path)))
+    }
+
+    func testGGMLMagic_rejectsNonModelFile() throws {
+        let html = Array("<!DOCTYPE html><html></html>".utf8)
+        let url = try makeTempFile(head: html, totalSize: html.count)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertFalse(try WhisperModelManager.hasGGMLMagic(at: url))
+    }
 }
 
 final class MouseButtonTests: XCTestCase {

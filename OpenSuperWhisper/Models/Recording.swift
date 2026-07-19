@@ -327,6 +327,8 @@ class RecordingStore: ObservableObject {
         Task {
             do {
                 try await deleteRecordingFromDB(recording)
+                // The row is gone, so no queue pass will ever clear this id.
+                TranscriptionQueue.shared.forgetRecording(recording.id)
                 try? FileManager.default.removeItem(at: recording.url)
                 await MainActor.run {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)

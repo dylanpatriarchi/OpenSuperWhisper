@@ -55,6 +55,14 @@ class TranscriptionQueue: ObservableObject {
         cancelledRecordingIds.remove(recordingId)
     }
 
+    /// Drops cancellation bookkeeping for a recording that no longer exists.
+    /// `clearCancellation` only runs inside `processRecording`, so an id
+    /// cancelled while it was *not* being processed would otherwise be retained
+    /// for the lifetime of the process.
+    func forgetRecording(_ recordingId: UUID) {
+        cancelledRecordingIds.remove(recordingId)
+    }
+
     func startProcessingQueue() {
         guard !isProcessing else { return }
 
@@ -224,10 +232,6 @@ class TranscriptionQueue: ObservableObject {
 
         currentTranscriptionTask = Task {
             do {
-                if isRecordingCancelled(recording.id) {
-                    return
-                }
-
                 if isRecordingCancelled(recording.id) || Task.isCancelled {
                     return
                 }
@@ -276,6 +280,10 @@ class TranscriptionQueue: ObservableObject {
                     isRegeneration: false
                 )
 
+            } catch is CancellationError {
+                // User-initiated stop, not a failure — leave the row alone.
+            } catch TranscriptionError.cancelled {
+                // Same, but surfaced through the service's own error type.
             } catch {
                 if !isRecordingCancelled(recording.id) && !Task.isCancelled {
                     await recordingStore.updateRecordingProgressOnlySync(

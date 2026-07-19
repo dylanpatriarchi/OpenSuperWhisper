@@ -94,6 +94,18 @@ class IndicatorViewModel: ObservableObject {
             return
         }
 
+        // The microphone is checked first on purpose. Both conditions block
+        // recording, but a missing model resolves itself in seconds while a
+        // missing microphone does not — reporting "loading model" to someone
+        // who has no input device sends them to wait for nothing.
+        //
+        // getActiveMicrophone() only reads the cached currentMicrophone, so
+        // this guard costs no CoreAudio HAL round-trip on the main thread.
+        guard MicrophoneService.shared.getActiveMicrophone() != nil else {
+            showAutoDismissingMessage(.noMicrophone)
+            return
+        }
+
         // Loading a large model takes several seconds, during which
         // `transcribeAudio` throws contextInitializationFailed and the error is
         // only printed — the user records, releases and sees nothing at all.
@@ -103,13 +115,6 @@ class IndicatorViewModel: ObservableObject {
             return
         }
 
-        // getActiveMicrophone() only reads the cached currentMicrophone, so
-        // this guard costs no CoreAudio HAL round-trip on the main thread.
-        guard MicrophoneService.shared.getActiveMicrophone() != nil else {
-            showAutoDismissingMessage(.noMicrophone)
-            return
-        }
-        
         // Optimistically assume recording: querying the microphone here costs
         // CoreAudio HAL round-trips on the main thread right before the appear
         // animation. The recorder resolves the real state on its own queue and

@@ -27,11 +27,16 @@ In concreto:
 - **Niente logica specifica per lingue asiatiche.** L'autocorrect CJK dell'upstream
   (spaziatura fra caratteri cinesi/giapponesi e latini, punteggiatura full-width) è stato
   rimosso: non si applica all'italiano e trascinava l'intera toolchain Rust nel build.
-- **In arrivo, in quest'ordine:**
-  - **Autocorrect italiano a bassa latenza** — correzioni deterministiche sugli errori
-    sistematici dell'ASR in italiano (accenti, apostrofi come `qual'è` → `qual è`,
-    maiuscole a inizio frase, formattazione di orari e numeri). Gira su *ogni* dettatura,
-    quindi dev'essere praticamente istantaneo: nessuna chiamata a un modello.
+- **Autocorrect italiano a bassa latenza** *(fatto)* — `ItalianTextCorrector` applica
+  correzioni deterministiche su ogni dettatura: nessuna chiamata a un modello, quindi
+  costo in microsecondi. Contiene **solo regole sempre-vere**: accenti la cui forma
+  senza accento non è una parola italiana (`perche` → `perché`, `piu` → `più`,
+  `citta` → `città`), grafie mai corrette (`pò` → `po'`, `qual'è` → `qual è`,
+  `daccordo` → `d'accordo`) e spazi prima della punteggiatura.
+  Tutto ciò che richiede contesto è **escluso di proposito**: `e`/`è`, `si`/`sì`,
+  `la`/`là`, `da`/`dà` hanno due grafie entrambe valide, e una regola cieca
+  cambierebbe il significato della frase. Quel lavoro spetta al livello LLM.
+- **In arrivo:**
   - **Riformulazione con LLM locale** — livello separato e opzionale, per ripulire le
     autocorrezioni del parlato. Da *"domani alle 10 non ci sarò, ah no, non è vero, alle
     10.30"* a *"domani non ci sarò alle 10.30"*. Whisper e Parakeet sono modelli di

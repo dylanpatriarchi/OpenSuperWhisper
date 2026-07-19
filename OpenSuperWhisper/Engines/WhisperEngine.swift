@@ -2,11 +2,23 @@ import Foundation
 import AVFoundation
 import CoreAudioTypes
 
-private class ProgressContext {
-    var onProgress: ((Float) -> Void)?
-    private var _lastReportedProgress: Float = 0.0
+/// Progress bridge for whisper's C callback. Like `AtomicFlag`, it is owned by
+/// the engine for its whole lifetime: whisper.cpp holds an unretained pointer to
+/// it, so the object must never be replaced or freed while a transcription runs.
+/// Per-transcription state is cleared via `reset(onProgress:)` instead.
+private final class ProgressContext {
     private let lock = NSLock()
-    
+    private var _onProgress: ((Float) -> Void)?
+    private var _lastReportedProgress: Float = 0.0
+
+    var onProgress: ((Float) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onProgress
+        }
+    }
+
     var lastReportedProgress: Float {
         get {
             lock.lock()
@@ -19,25 +31,13 @@ private class ProgressContext {
             _lastReportedProgress = newValue
         }
     }
-}
 
-/// Thread-safe cancellation flag. Owned by the engine for its whole lifetime,
-/// so the pointer passed into whisper's C callback can never dangle.
-private final class AbortFlag {
-    private let lock = NSLock()
-    private var _isSet = false
-    
-    var isSet: Bool {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _isSet
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _isSet = newValue
-        }
+    /// Rearm for a new transcription without changing the object's address.
+    func reset(onProgress: ((Float) -> Void)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        _onProgress = onProgress
+        _lastReportedProgress = 0.0
     }
 }
 
@@ -51,8 +51,10 @@ class WhisperEngine: TranscriptionEngine {
     
     private var context: MyWhisperContext?
     private var vadContext: MyWhisperVadContext?
-    private let abortFlag = AbortFlag()
-    private var progressContext: ProgressContext?
+    /// Both are owned for the engine's whole lifetime: whisper.cpp receives
+    /// unretained pointers to them, so they must outlive any single run.
+    private let abortFlag = AtomicFlag()
+    private let progressContext = ProgressContext()
     
     var onProgressUpdate: ((Float) -> Void)?
     
@@ -84,14 +86,10 @@ class WhisperEngine: TranscriptionEngine {
         
         abortFlag.isSet = false
         
-        // Setup progress context for callback
-        progressContext = ProgressContext()
-        progressContext?.onProgress = onProgressUpdate
-        
-        defer {
-            progressContext = nil
-        }
-        
+        // Rearm the long-lived progress context for this run. It must not be
+        // reallocated: whisper.cpp still holds an unretained pointer to it.
+        progressContext.reset(onProgress: onProgressUpdate)
+
         // Notify conversion start (0-10% is conversion phase)
         onProgressUpdate?(0.05)
         
@@ -147,7 +145,7 @@ class WhisperEngine: TranscriptionEngine {
         typealias GGMLAbortCallback = @convention(c) (UnsafeMutableRawPointer?) -> Bool
         let abortCallback: GGMLAbortCallback = { userData in
             guard let userData = userData else { return false }
-            return Unmanaged<AbortFlag>.fromOpaque(userData).takeUnretainedValue().isSet
+            return Unmanaged<AtomicFlag>.fromOpaque(userData).takeUnretainedValue().isSet
         }
         
         // Progress callback: whisper reports 0-100%, we map to 10-95%
@@ -167,7 +165,7 @@ class WhisperEngine: TranscriptionEngine {
             }
         }
         
-        let progressContextPtr = Unmanaged.passUnretained(progressContext!).toOpaque()
+        let progressContextPtr = Unmanaged.passUnretained(progressContext).toOpaque()
         params.progressCallback = progressCallback
         params.progressCallbackUserData = progressContextPtr
         

@@ -13,20 +13,7 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-echo "Building autocorrect-swift..."
 mkdir -p build
-CARGO_PROFILE_RELEASE_LTO=true \
-CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-CARGO_PROFILE_RELEASE_STRIP=symbols \
-CARGO_PROFILE_RELEASE_PANIC=abort \
-cargo build -p autocorrect-swift --release --target aarch64-apple-darwin --manifest-path=asian-autocorrect/Cargo.toml
-cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.dylib ./build/libautocorrect_swift.dylib
-install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
-codesign --force --sign - ./build/libautocorrect_swift.dylib
-if [[ $? -ne 0 ]]; then
-    echo "Cargo build failed!"
-    exit 1
-fi
 
 echo "Copying libomp.dylib..."
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib

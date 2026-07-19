@@ -18,7 +18,6 @@ OpenSuperWhisper is a macOS application that provides real-time audio transcript
 - 📁 Drag & drop audio files for transcription with queue processing
 - 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
 - 🌍 Support for multiple languages with auto-detection
-- 🇯🇵🇨🇳🇰🇷 Asian language autocorrect ([autocorrect](https://github.com/huacnlee/autocorrect))
 
 ## Installation
 
@@ -57,7 +56,7 @@ Then:
     git clone git@github.com:dylanpatriarchi/OpenSuperWhisper.git
     cd OpenSuperWhisper
     git submodule update --init --recursive
-    brew install cmake libomp rust ruby
+    brew install cmake libomp ruby
     gem install xcpretty
     ./run.sh build
 

@@ -90,6 +90,23 @@ final class ReformulationServiceTests: XCTestCase {
         XCTAssertEqual(ReformulationService.sanitize(quoted, fallingBackTo: original), quoted)
     }
 
+    /// A sentence that merely *starts and ends* with a quotation looks exactly
+    /// like a wrapped one. Stripping the ends there leaves unbalanced, mangled
+    /// text, so these must survive untouched.
+    func testSentencesThatOpenAndCloseWithQuotesAreNotUnwrapped() {
+        let cases = [
+            "\u{201C}Vengo\u{201D} disse lui, poi aggiunse \u{201C}no aspetta\u{201D}",
+            "\"Vengo\" disse lui, poi aggiunse \"no aspetta\"",
+            "\u{201C}Vengo\u{201D} disse lui, poi aggiunse \"no aspetta\"",
+        ]
+        for text in cases {
+            XCTAssertEqual(
+                ReformulationService.sanitize(text, fallingBackTo: original), text,
+                "two separate quotations must not be read as one wrapping pair"
+            )
+        }
+    }
+
     func testTrimsSurroundingWhitespace() {
         XCTAssertEqual(
             ReformulationService.sanitize("\n  Domani non ci sarò.  \n", fallingBackTo: original),

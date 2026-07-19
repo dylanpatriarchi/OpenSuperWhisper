@@ -230,13 +230,18 @@ class IndicatorViewModel: ObservableObject {
                             rawTranscription: text == rawText ? nil : rawText
                         )
                         
-                        try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-
                         // Cancelling used to be cosmetic: the window went away but
                         // this task kept running and still pasted its result into
                         // whatever the user was doing next. Reformulation made that
                         // window seconds long, so check before touching anything.
+                        //
+                        // Before the move, not after: past this point the audio
+                        // lives at newRecording.url, and the cancellation path only
+                        // knows how to clean up tempURL — it would leave a file
+                        // behind with no database row ever pointing at it.
                         try Task.checkCancellation()
+
+                        try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
 
                         // Awaited, not fire-and-forget. addRecording swallows write
                         // failures into a print, which would let us paste a rewrite
@@ -257,9 +262,14 @@ class IndicatorViewModel: ObservableObject {
                         print("Transcription result: \(text)")
                     }
                 } catch is CancellationError {
-                    // The user asked for this to go away. Say nothing, paste
-                    // nothing; the audio file stays where the successful path
-                    // left it, or gets cleaned up below if it never moved.
+                    // The user asked for this to go away: paste nothing, keep
+                    // nothing. The cancellation check runs before the audio is
+                    // moved, so removing tempURL here really does clean up.
+                    try? FileManager.default.removeItem(at: tempURL)
+                    print("Dictation cancelled by the user")
+                } catch TranscriptionError.cancelled {
+                    // Cancelling mid-transcription surfaces as this, not as
+                    // CancellationError — same intent, same handling.
                     try? FileManager.default.removeItem(at: tempURL)
                     print("Dictation cancelled by the user")
                 } catch {
@@ -341,10 +351,19 @@ class IndicatorViewModel: ObservableObject {
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
-        // Stops transcription/reformulation already in flight, not just the mic.
+
+        // Only touch the shared service when this session actually owns the
+        // transcription in flight. TranscriptionService is a singleton the
+        // queue uses too, and cancelTranscription() is unconditional: calling
+        // it while merely recording would abort an unrelated queued file and
+        // strand its row mid-status, with nothing to retry it.
+        // TranscriptionQueue.cancelRecording(_:) guards the same way.
+        if decodingTask != nil {
+            transcriptionService.cancelTranscription()
+        }
         decodingTask?.cancel()
         decodingTask = nil
-        transcriptionService.cancelTranscription()
+
         recorder.cancelRecording()
     }
 }

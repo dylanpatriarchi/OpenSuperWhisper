@@ -139,11 +139,20 @@ final class ReformulationService: ObservableObject {
 
         // Typographic quotes too: models reach for “ ” at least as often as ",
         // and an unstripped pair ends up pasted into the user's document.
-        let openingQuotes: Set<Character> = ["\"", "\u{201C}", "\u{201D}", "\u{00AB}"]
-        let closingQuotes: Set<Character> = ["\"", "\u{201D}", "\u{201C}", "\u{00BB}"]
+        //
+        // The opening character must match its own closing partner, and the
+        // interior must be free of both. Otherwise a sentence that merely
+        // starts and ends with a quotation — «"Vengo" disse, poi "no aspetta"»
+        // — looks exactly like a wrapped one, and stripping the ends leaves
+        // the user with mangled, unbalanced text.
+        let quotePairs: [Character: Character] = [
+            "\"": "\"", "\u{201C}": "\u{201D}", "\u{00AB}": "\u{00BB}",
+        ]
         if cleaned.count >= 2,
-           let first = cleaned.first, let last = cleaned.last,
-           openingQuotes.contains(first), closingQuotes.contains(last) {
+           let first = cleaned.first,
+           let closing = quotePairs[first],
+           cleaned.last == closing,
+           cleaned.dropFirst().dropLast().allSatisfy({ $0 != first && $0 != closing }) {
             cleaned = String(cleaned.dropFirst().dropLast())
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }

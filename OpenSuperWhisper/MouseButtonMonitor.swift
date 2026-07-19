@@ -122,7 +122,14 @@ class MouseButtonMonitor {
             CGEvent.tapEnable(tap: tap, enable: false)
             if let source = runLoopSource {
                 CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+                // Removing a source does not invalidate it; without this the
+                // runloop keeps the registration alive.
+                CFRunLoopSourceInvalidate(source)
             }
+            // Releases the mach port receive right. Dropping the last Swift
+            // reference does not do this, so every stop()/start() cycle — one
+            // per hotkey settings change — would otherwise leak a port.
+            CFMachPortInvalidate(tap)
         }
         eventTap = nil
         runLoopSource = nil

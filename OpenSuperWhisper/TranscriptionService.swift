@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 class TranscriptionService: ObservableObject {
     static let shared = TranscriptionService()
-    
+
     @Published private(set) var isTranscribing = false
     @Published private(set) var transcribedText = ""
     @Published private(set) var currentSegment = ""
@@ -11,86 +11,120 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var progress: Float = 0.0
     @Published private(set) var isConverting = false
     @Published private(set) var conversionProgress: Float = 0.0
-    
+
+    /// Boxes the task so pending work can be compared by identity (`===`);
+    /// `Task` is a struct and has no identity of its own.
     private final class TranscriptionTaskBox {
         let task: Task<String, Error>
         init(_ task: Task<String, Error>) { self.task = task }
     }
-    
+
     private var currentEngine: TranscriptionEngine?
-    private var transcriptionTask: TranscriptionTaskBox? = nil
+
+    /// Most recently queued transcription. New work chains onto it so a single
+    /// engine — and the whisper context inside it — is never entered twice
+    /// concurrently by the indicator and queue flows.
+    private var transcriptionTask: TranscriptionTaskBox?
+
+    /// Set by `cancelTranscription()` and cleared only when the next
+    /// transcription starts. The canceller must not clear it itself, or the
+    /// in-flight run would never observe the cancellation.
     private var isCancelled = false
-    
+
+    /// Discriminates overlapping `loadEngine()` calls so a slow earlier load
+    /// cannot install its engine over a newer one.
+    private var engineLoadGeneration = 0
+
     init() {
         loadEngine()
     }
-    
+
     func cancelTranscription() {
         isCancelled = true
         currentEngine?.cancelTranscription()
         transcriptionTask?.task.cancel()
-        transcriptionTask = nil
-        
+
         isTranscribing = false
         currentSegment = ""
         progress = 0.0
-        isCancelled = false
     }
-    
+
     private func loadEngine() {
         let selectedEngine = AppPreferences.shared.selectedEngine
         print("Loading engine: \(selectedEngine)")
-        
+
+        engineLoadGeneration &+= 1
+        let generation = engineLoadGeneration
         isLoading = true
-        
-        Task.detached(priority: .userInitiated) {
+
+        Task.detached(priority: .userInitiated) { [weak self] in
             let engine: TranscriptionEngine?
-            
+
             if selectedEngine == "fluidaudio" {
                 engine = await FluidAudioEngine()
             } else {
                 engine = await WhisperEngine()
             }
-            
+
             do {
                 try await engine?.initialize()
-                
+
                 await MainActor.run {
+                    guard let self, self.engineLoadGeneration == generation else { return }
                     self.currentEngine = engine
                     self.isLoading = false
                     print("Engine loaded: \(selectedEngine)")
                 }
             } catch {
                 await MainActor.run {
+                    guard let self, self.engineLoadGeneration == generation else { return }
                     self.isLoading = false
                     print("Failed to load engine: \(error)")
                 }
             }
         }
     }
-    
+
     func reloadEngine() {
         loadEngine()
     }
-    
+
     func reloadModel(with path: String) {
         if AppPreferences.shared.selectedEngine == "whisper" {
             AppPreferences.shared.selectedWhisperModelPath = path
             reloadEngine()
         }
     }
-    
+
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
-        // Serialize access to the engine: a whisper context must not process
-        // two transcriptions concurrently (indicator flow and queue flow can
-        // both reach this point due to async busy checks).
-        while let existing = transcriptionTask {
-            _ = try? await existing.task.value
-            if transcriptionTask === existing {
+        // Chain onto whatever is already queued. Reading the predecessor and
+        // installing our own box happen with no `await` in between, so on the
+        // main actor two callers can never both observe an idle engine.
+        let predecessor = transcriptionTask
+        let task = Task<String, Error> { [weak self] in
+            _ = try? await predecessor?.task.value
+            guard let self else { throw CancellationError() }
+            return try await self.performTranscription(url: url, settings: settings)
+        }
+        let box = TranscriptionTaskBox(task)
+        transcriptionTask = box
+
+        defer {
+            // Only clear the slot if it is still ours; a later caller may have
+            // already chained onto us and installed its own box.
+            if transcriptionTask === box {
                 transcriptionTask = nil
             }
         }
-        
+
+        do {
+            return try await task.value
+        } catch is CancellationError {
+            throw TranscriptionError.cancelled
+        }
+    }
+
+    private func performTranscription(url: URL, settings: Settings) async throws -> String {
         progress = 0.0
         conversionProgress = 0.0
         isConverting = true
@@ -98,23 +132,20 @@ class TranscriptionService: ObservableObject {
         transcribedText = ""
         currentSegment = ""
         isCancelled = false
-        
+
         defer {
-            Task { @MainActor in
-                self.isTranscribing = false
-                self.isConverting = false
-                self.currentSegment = ""
-                if !self.isCancelled {
-                    self.progress = 1.0
-                }
-                self.transcriptionTask = nil
+            isTranscribing = false
+            isConverting = false
+            currentSegment = ""
+            if !isCancelled {
+                progress = 1.0
             }
         }
-        
+
         guard let engine = currentEngine else {
             throw TranscriptionError.contextInitializationFailed
         }
-        
+
         // Setup progress callback for engines
         if let whisperEngine = engine as? WhisperEngine {
             whisperEngine.onProgressUpdate = { [weak self] newProgress in
@@ -131,49 +162,25 @@ class TranscriptionService: ObservableObject {
                 }
             }
         }
-        
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+
+        guard !isCancelled else { throw CancellationError() }
+
+        let work = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            
-            let cancelled = await MainActor.run {
-                guard let self = self else { return true }
-                return self.isCancelled
-            }
-            
-            guard !cancelled else {
-                throw CancellationError()
-            }
-            
-            let result = try await engine.transcribeAudio(url: url, settings: settings)
-            
-            try Task.checkCancellation()
-            
-            let finalCancelled = await MainActor.run {
-                guard let self = self else { return true }
-                return self.isCancelled
-            }
-            
-            await MainActor.run {
-                guard let self = self, !self.isCancelled else { return }
-                self.transcribedText = result
-                self.progress = 1.0
-            }
-            
-            guard !finalCancelled else {
-                throw CancellationError()
-            }
-            
-            return result
+            return try await engine.transcribeAudio(url: url, settings: settings)
         }
-        
-        transcriptionTask = TranscriptionTaskBox(task)
-        
-        do {
-            return try await task.value
-        } catch is CancellationError {
-            isCancelled = true
-            throw TranscriptionError.processingFailed
-        }
+
+        let result = try await work.value
+
+        // Publish only after confirming the run was not cancelled, so a
+        // cancelled transcription never flashes its text into the UI.
+        try Task.checkCancellation()
+        guard !isCancelled else { throw CancellationError() }
+
+        transcribedText = result
+        progress = 1.0
+
+        return result
     }
 }
 
@@ -181,4 +188,5 @@ enum TranscriptionError: Error {
     case contextInitializationFailed
     case audioConversionFailed
     case processingFailed
+    case cancelled
 }

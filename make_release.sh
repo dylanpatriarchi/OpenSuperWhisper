@@ -145,7 +145,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
         https://api.github.com/repos/dylanpatriarchi/ItalianSuperWhisper/releases \
         -d '{
             "tag_name": "'${NEW_VERSION}'",
-            "target_commitish": "master",
+            "target_commitish": "main",
             "name": "Release '${NEW_VERSION}'",
             "body": "## OpenSuperWhisper '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using Whisper.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensuperwhisper\n```\n\n### Manual Installation\n1. Download the `OpenSuperWhisper.dmg` file below\n2. Open the DMG and drag OpenSuperWhisper to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
             "draft": false,

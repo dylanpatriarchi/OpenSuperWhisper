@@ -99,7 +99,11 @@ class FluidAudioEngine: TranscriptionEngine {
         // Finalize
         onProgressUpdate?(0.95)
 
-        let processedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var processedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if settings.shouldApplyItalianCorrections {
+            processedText = ItalianTextCorrector.correct(processedText)
+        }
 
         onProgressUpdate?(1.0)
 

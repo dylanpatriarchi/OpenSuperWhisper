@@ -619,6 +619,13 @@ struct Settings {
     var useBeamSearch: Bool
     var beamSize: Int
     
+    /// Italian-only deterministic corrections. Gated on an explicit "it": with
+    /// "auto" the language is not known here, and these rules must never run on
+    /// another language.
+    var shouldApplyItalianCorrections: Bool {
+        selectedLanguage == "it"
+    }
+    
     init() {
         let prefs = AppPreferences.shared
         self.selectedLanguage = prefs.whisperLanguage

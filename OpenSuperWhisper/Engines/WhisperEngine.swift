@@ -217,7 +217,8 @@ class WhisperEngine: TranscriptionEngine {
             .replacingOccurrences(of: "[BLANK_AUDIO]", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         
-        return cleanedText
+        guard settings.shouldApplyItalianCorrections else { return cleanedText }
+        return ItalianTextCorrector.correct(cleanedText)
     }
     
     func cancelTranscription() {

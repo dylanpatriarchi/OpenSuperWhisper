@@ -130,8 +130,9 @@ Applied in [#1](https://github.com/dylanpatriarchi/OpenSuperWhisper/pull/1):
 Questo fork:
 
 - [x] Rimozione dell'autocorrect CJK e della toolchain Rust dal build
-- [ ] **Autocorrect italiano a bassa latenza** — accenti, apostrofi, maiuscole, orari;
-      deterministico, senza modello, su ogni dettatura
+- [x] **Autocorrect italiano a bassa latenza** — `ItalianTextCorrector`: accenti non
+      ambigui, apostrofi, spaziatura. Deterministico, nessun modello, solo regole
+      sempre-vere; le ambiguità (`e`/`è`, `si`/`sì`) sono lasciate al livello LLM
 - [ ] **Riformulazione con LLM locale** — rimozione delle autocorrezioni del parlato,
       opzionale e dietro toggle, con il testo grezzo sempre conservato
 - [ ] Confronto Whisper vs Parakeet sull'italiano, per capire quale tenere come default

@@ -7,6 +7,7 @@ enum RecordingState {
     case connecting
     case recording
     case decoding
+    case reformulating
     case busy
     case noMicrophone
     case modelLoading
@@ -147,6 +148,23 @@ class IndicatorViewModel: ObservableObject {
         isConfirmingCancel = false
     }
     
+    /// Runs the local-LLM rewrite when the user has enabled it.
+    ///
+    /// Always returns usable text: a reformulation that fails, or that the model
+    /// is not there for, must never cost the user their dictation, so every
+    /// error path falls back to what the engine transcribed.
+    private func reformulateIfEnabled(_ text: String) async -> String {
+        guard AppPreferences.shared.reformulationEnabled else { return text }
+
+        state = .reformulating
+        do {
+            return try await ReformulationService.shared.reformulate(text)
+        } catch {
+            print("Reformulation failed, keeping the raw transcription: \(error)")
+            return text
+        }
+    }
+
     func startDecoding() {
         // A second stop request (double hotkey press, hold-mode key-up) must not
         // restart decoding or hide the window while transcription is in flight.
@@ -177,12 +195,13 @@ class IndicatorViewModel: ObservableObject {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
-                    
-                    if text.isEmpty {
+                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+
+                    if rawText.isEmpty {
                         try? FileManager.default.removeItem(at: tempURL)
                         print("No speech detected, dictation discarded")
                     } else {
+                        let text = await self.reformulateIfEnabled(rawText)
                         let timestamp = Date()
                         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
                         let recordingId = UUID()
@@ -194,7 +213,10 @@ class IndicatorViewModel: ObservableObject {
                             duration: duration,
                             status: .completed,
                             progress: 1.0,
-                            sourceFileURL: nil
+                            sourceFileURL: nil,
+                            // Only worth storing when the rewrite actually changed
+                            // something — otherwise it is a duplicate row.
+                            rawTranscription: text == rawText ? nil : rawText
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
@@ -396,6 +418,17 @@ struct IndicatorWindow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
+            case .reformulating:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .frame(width: 24)
+
+                    Text("Rewriting...")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             case .busy:
                 HStack(spacing: 8) {
                     Image(systemName: "hourglass")

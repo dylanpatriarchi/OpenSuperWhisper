@@ -133,6 +133,11 @@ final class AppPreferences {
     @UserDefault(key: "startHiddenInMenuBar", defaultValue: false)
     var startHiddenInMenuBar: Bool
 
+    /// Local-LLM reformulation of the dictation. Off by default: enabling it
+    /// downloads a multi-gigabyte model and adds seconds to every dictation.
+    @UserDefault(key: "reformulationEnabled", defaultValue: false)
+    var reformulationEnabled: Bool
+
     @UserDefault(key: "autoDeleteRecordingsEnabled", defaultValue: false)
     var autoDeleteRecordingsEnabled: Bool
 

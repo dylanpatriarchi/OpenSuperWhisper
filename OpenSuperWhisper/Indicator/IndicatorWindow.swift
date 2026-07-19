@@ -7,6 +7,7 @@ enum RecordingState {
     case connecting
     case recording
     case decoding
+    case reformulating
     case busy
     case noMicrophone
     case modelLoading
@@ -34,6 +35,9 @@ class IndicatorViewModel: ObservableObject {
     private var blinkTimer: Timer?
     private var hideTimer: Timer?
     private var confirmCancelTimer: Timer?
+    /// Held so that cancelling can actually stop the work. Without a reference
+    /// the task runs to completion after the user has dismissed the indicator.
+    private var decodingTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     
     private let recordingStore: RecordingStore
@@ -93,6 +97,18 @@ class IndicatorViewModel: ObservableObject {
             return
         }
 
+        // The microphone is checked first on purpose. Both conditions block
+        // recording, but a missing model resolves itself in seconds while a
+        // missing microphone does not — reporting "loading model" to someone
+        // who has no input device sends them to wait for nothing.
+        //
+        // getActiveMicrophone() only reads the cached currentMicrophone, so
+        // this guard costs no CoreAudio HAL round-trip on the main thread.
+        guard MicrophoneService.shared.getActiveMicrophone() != nil else {
+            showAutoDismissingMessage(.noMicrophone)
+            return
+        }
+
         // Loading a large model takes several seconds, during which
         // `transcribeAudio` throws contextInitializationFailed and the error is
         // only printed — the user records, releases and sees nothing at all.
@@ -102,13 +118,6 @@ class IndicatorViewModel: ObservableObject {
             return
         }
 
-        // getActiveMicrophone() only reads the cached currentMicrophone, so
-        // this guard costs no CoreAudio HAL round-trip on the main thread.
-        guard MicrophoneService.shared.getActiveMicrophone() != nil else {
-            showAutoDismissingMessage(.noMicrophone)
-            return
-        }
-        
         // Optimistically assume recording: querying the microphone here costs
         // CoreAudio HAL round-trips on the main thread right before the appear
         // animation. The recorder resolves the real state on its own queue and
@@ -147,6 +156,26 @@ class IndicatorViewModel: ObservableObject {
         isConfirmingCancel = false
     }
     
+    /// Runs the local-LLM rewrite when the user has enabled it.
+    ///
+    /// Always returns usable text: a reformulation that fails, or that the model
+    /// is not there for, must never cost the user their dictation, so every
+    /// error path falls back to what the engine transcribed.
+    private func reformulateIfEnabled(_ text: String) async -> String {
+        guard AppPreferences.shared.reformulationEnabled else { return text }
+        guard !Task.isCancelled else { return text }
+
+        state = .reformulating
+        do {
+            return try await ReformulationService.shared.reformulate(text)
+        } catch is CancellationError {
+            return text
+        } catch {
+            print("Reformulation failed, keeping the raw transcription: \(error)")
+            return text
+        }
+    }
+
     func startDecoding() {
         // A second stop request (double hotkey press, hold-mode key-up) must not
         // restart decoding or hide the window while transcription is in flight.
@@ -169,20 +198,21 @@ class IndicatorViewModel: ObservableObject {
         }
         
         state = .decoding
-        
-        Task { [weak self] in
+
+        decodingTask = Task { [weak self] in
             guard let self = self else { return }
-            
+
             if let tempURL = await self.recorder.stopRecording() {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
-                    
-                    if text.isEmpty {
+                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+
+                    if rawText.isEmpty {
                         try? FileManager.default.removeItem(at: tempURL)
                         print("No speech detected, dictation discarded")
                     } else {
+                        let text = await self.reformulateIfEnabled(rawText)
                         let timestamp = Date()
                         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
                         let recordingId = UUID()
@@ -194,18 +224,54 @@ class IndicatorViewModel: ObservableObject {
                             duration: duration,
                             status: .completed,
                             progress: 1.0,
-                            sourceFileURL: nil
+                            sourceFileURL: nil,
+                            // Only worth storing when the rewrite actually changed
+                            // something — otherwise it is a duplicate row.
+                            rawTranscription: text == rawText ? nil : rawText
                         )
                         
+                        // Cancelling used to be cosmetic: the window went away but
+                        // this task kept running and still pasted its result into
+                        // whatever the user was doing next. Reformulation made that
+                        // window seconds long, so check before touching anything.
+                        //
+                        // Before the move, not after: past this point the audio
+                        // lives at newRecording.url, and the cancellation path only
+                        // knows how to clean up tempURL — it would leave a file
+                        // behind with no database row ever pointing at it.
+                        try Task.checkCancellation()
+
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-                        
-                        await MainActor.run {
-                            self.recordingStore.addRecording(newRecording)
+
+                        // Awaited, not fire-and-forget. addRecording swallows write
+                        // failures into a print, which would let us paste a rewrite
+                        // whose raw text was never stored anywhere.
+                        do {
+                            try await self.recordingStore.addRecordingSync(newRecording)
+                        } catch {
+                            // The audio file has already been moved into place, so
+                            // the dictation is not lost — but the history row is.
+                            print("""
+                                Failed to save the recording: \(error)
+                                The audio is at \(newRecording.url.path); \
+                                raw transcription: \(newRecording.rawTranscription ?? text)
+                                """)
                         }
-                        
+
                         insertText(text)
                         print("Transcription result: \(text)")
                     }
+                } catch is CancellationError {
+                    // The user asked for this to go away: paste nothing, keep
+                    // nothing. The cancellation check runs before the audio is
+                    // moved, so removing tempURL here really does clean up.
+                    try? FileManager.default.removeItem(at: tempURL)
+                    print("Dictation cancelled by the user")
+                } catch TranscriptionError.cancelled {
+                    // Cancelling mid-transcription surfaces as this, not as
+                    // CancellationError — same intent, same handling.
+                    try? FileManager.default.removeItem(at: tempURL)
+                    print("Dictation cancelled by the user")
                 } catch {
                     print("Error transcribing audio: \(error)")
                     try? FileManager.default.removeItem(at: tempURL)
@@ -277,12 +343,27 @@ class IndicatorViewModel: ObservableObject {
         recordingStartedAt = nil
         hideTimer?.invalidate()
         hideTimer = nil
+        decodingTask?.cancel()
+        decodingTask = nil
         cancellables.removeAll()
     }
 
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
+
+        // Only touch the shared service when this session actually owns the
+        // transcription in flight. TranscriptionService is a singleton the
+        // queue uses too, and cancelTranscription() is unconditional: calling
+        // it while merely recording would abort an unrelated queued file and
+        // strand its row mid-status, with nothing to retry it.
+        // TranscriptionQueue.cancelRecording(_:) guards the same way.
+        if decodingTask != nil {
+            transcriptionService.cancelTranscription()
+        }
+        decodingTask?.cancel()
+        decodingTask = nil
+
         recorder.cancelRecording()
     }
 }
@@ -396,6 +477,17 @@ struct IndicatorWindow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
+            case .reformulating:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .frame(width: 24)
+
+                    Text("Rewriting...")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             case .busy:
                 HStack(spacing: 8) {
                     Image(systemName: "hourglass")

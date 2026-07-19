@@ -184,6 +184,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
+    @Published var reformulationEnabled: Bool {
+        didSet {
+            AppPreferences.shared.reformulationEnabled = reformulationEnabled
+        }
+    }
+
     @Published var autoCopyToClipboard: Bool {
         didSet {
             AppPreferences.shared.autoCopyToClipboard = autoCopyToClipboard
@@ -217,6 +223,7 @@ class SettingsViewModel: ObservableObject {
         self.escCancelWithoutConfirmation = prefs.escCancelWithoutConfirmation
         self.startHiddenInMenuBar = prefs.startHiddenInMenuBar
         self.addSpaceAfterSentence = prefs.addSpaceAfterSentence
+        self.reformulationEnabled = prefs.reformulationEnabled
         self.autoCopyToClipboard = prefs.autoCopyToClipboard
         self.autoPasteTranscription = prefs.autoPasteTranscription
 
@@ -921,6 +928,41 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.addSpaceAfterSentence)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+
+                // Reformulation
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Riformulazione")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Riformula la dettatura")
+                                    .font(.subheadline)
+                                Text("Rimuove le autocorrezioni del parlato con un modello locale. Il testo grezzo resta salvato.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.reformulationEnabled)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                        }
+
+                        if viewModel.reformulationEnabled {
+                            Text("Alla prima dettatura viene scaricato un modello di alcuni GB. Ogni dettatura richiede qualche secondo in più.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

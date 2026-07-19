@@ -18,11 +18,17 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var status: RecordingStatus
     var progress: Float
     var sourceFileURL: String?
+
+    /// The transcription exactly as the engine produced it, before any
+    /// reformulation. A rewrite must never be the only surviving copy of what
+    /// the user actually dictated.
+    var rawTranscription: String? = nil
     
     var isRegeneration: Bool = false
     
     enum CodingKeys: String, CodingKey {
         case id, timestamp, fileName, transcription, duration, status, progress, sourceFileURL
+        case rawTranscription
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -65,6 +71,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let status = Column(CodingKeys.status)
         static let progress = Column(CodingKeys.progress)
         static let sourceFileURL = Column(CodingKeys.sourceFileURL)
+        static let rawTranscription = Column(CodingKeys.rawTranscription)
     }
 }
 
@@ -128,6 +135,15 @@ class RecordingStore: ObservableObject {
             }
         }
         
+        migrator.registerMigration("v3_add_raw_transcription") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("rawTranscription") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "rawTranscription", .text)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     

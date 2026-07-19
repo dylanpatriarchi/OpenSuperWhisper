@@ -6,25 +6,15 @@ APP_NAME="OpenSuperWhisper"
 APP_PATH="./build/Build/Products/Release/OpenSuperWhisper.app"                        
 ZIP_PATH="./build/OpenSuperWhisper.zip"                        
 BUNDLE_ID="ru.starmel.OpenSuperWhisper"                       
-KEYCHAIN_PROFILE="Slava"
+KEYCHAIN_PROFILE="${KEYCHAIN_PROFILE:?set it to your notarytool keychain profile}"
 CODE_SIGN_IDENTITY="${1}"
-DEVELOPMENT_TEAM="8LLDD7HWZK"
+DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:?set it to your Apple Developer Team ID}"
 
 rm -rf libwhisper/build
 cmake -G Xcode -B libwhisper/build -S libwhisper
 
 rm -rf build
 mkdir -p build
-
-echo "Building autocorrect-swift..."
-CARGO_PROFILE_RELEASE_LTO=true \
-CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-CARGO_PROFILE_RELEASE_STRIP=symbols \
-CARGO_PROFILE_RELEASE_PANIC=abort \
-cargo build -p autocorrect-swift --release --target aarch64-apple-darwin --manifest-path=asian-autocorrect/Cargo.toml
-cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.dylib ./build/libautocorrect_swift.dylib
-install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
-codesign --force --sign "${CODE_SIGN_IDENTITY}" --timestamp ./build/libautocorrect_swift.dylib
 
 echo "Copying libomp.dylib..."
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib

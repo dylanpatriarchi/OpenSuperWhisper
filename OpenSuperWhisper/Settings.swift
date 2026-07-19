@@ -709,7 +709,7 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/Starmel/OpenSuperWhisper")!) {
+                Link(destination: URL(string: "https://github.com/dylanpatriarchi/ItalianSuperWhisper")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "star")
                             .font(.system(size: 10))

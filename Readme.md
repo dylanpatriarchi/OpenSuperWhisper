@@ -91,8 +91,8 @@ if it reports that it requires Xcode, point the toolchain at it:
 
 Then:
 
-    git clone git@github.com:dylanpatriarchi/OpenSuperWhisper.git
-    cd OpenSuperWhisper
+    git clone git@github.com:dylanpatriarchi/ItalianSuperWhisper.git
+    cd ItalianSuperWhisper
     git submodule update --init --recursive
     brew install cmake libomp ruby
     gem install xcpretty

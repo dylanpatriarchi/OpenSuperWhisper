@@ -17,13 +17,20 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Display name only. The bundle identifier, the target name and the
+	     Swift module are deliberately left as OpenSuperWhisper: the bundle id
+	     keys the granted Accessibility/Microphone permissions and derives the
+	     Application Support path holding the recordings database and the
+	     downloaded models. Renaming those needs a data migration. -->
+	<key>CFBundleDisplayName</key>
+	<string>ItalianSuperWhisper</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenSuperWhisper needs microphone access to record audio for transcription.</string>
+	<string>ItalianSuperWhisper needs microphone access to record audio for transcription.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>OpenSuperWhisper needs accessibility access to provide system-wide functionality.</string>
+	<string>ItalianSuperWhisper needs accessibility access to provide system-wide functionality.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>OpenSuperWhisper needs accessibility access to provide system-wide functionality.</string>
+	<string>ItalianSuperWhisper needs accessibility access to provide system-wide functionality.</string>
 </dict>
 </plist>

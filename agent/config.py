@@ -11,12 +11,12 @@ AGENT_DIR = REPO_ROOT / "agent"
 ENV_FILE = AGENT_DIR / ".env"
 
 MODEL = "openrouter/deepseek/deepseek-v4-flash"
-BASE_BRANCH = "master"
+BASE_BRANCH = "main"
 
-# Issues are read from the public upstream repo; branches and PRs go to the
-# private fork so the work stays private.
-UPSTREAM_REPO = "Starmel/OpenSuperWhisper"
-FORK_REPO = "Starmel/OpenSuperWhisper-private"
+# Both issues and PRs live in this repo. Upstream is only the ancestor of the
+# fork, not somewhere this automation should read from or write to.
+UPSTREAM_REPO = "dylanpatriarchi/ItalianSuperWhisper"
+FORK_REPO = "dylanpatriarchi/ItalianSuperWhisper"
 FORK_REMOTE = "fork"
 
 # CA bundle used by aider's HTTP client (this Python build ships without one).

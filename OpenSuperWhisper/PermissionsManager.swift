@@ -22,7 +22,7 @@ class PermissionsManager: ObservableObject {
     // are synchronous XPC round-trips to tccd taking 40-100 ms — they must
     // never run on the main thread (traces showed them dropping animation
     // frames every second while the polling timer was active).
-    private let checkQueue = DispatchQueue(label: "com.opensuperwhisper.permissions", qos: .utility)
+    private let checkQueue = DispatchQueue(label: "com.italiansuperwhisper.permissions", qos: .utility)
     private var isCheckInFlight = false
 
     private var permissionCheckTimer: Timer?

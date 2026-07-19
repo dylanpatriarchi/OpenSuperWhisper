@@ -7,7 +7,9 @@ class FluidAudioEngine: TranscriptionEngine {
     
     private var asrManager: AsrManager?
     private var asrModels: AsrModels?
-    private var isCancelled = false
+    /// Written by `cancelTranscription()` on the main actor, read from the
+    /// background thread running the transcription — needs real synchronization.
+    private let cancelFlag = AtomicFlag()
     private var transcriptionTask: Task<String, Error>?
     private var progressTask: Task<Void, Never>?
     
@@ -34,12 +36,12 @@ class FluidAudioEngine: TranscriptionEngine {
             throw TranscriptionError.contextInitializationFailed
         }
         
-        isCancelled = false
-        
+        cancelFlag.isSet = false
+
         // Notify start
         onProgressUpdate?(0.02)
-        
-        guard !isCancelled else {
+
+        guard !cancelFlag.isSet else {
             throw CancellationError()
         }
         
@@ -54,7 +56,7 @@ class FluidAudioEngine: TranscriptionEngine {
                 let progressStream = await asrManager.transcriptionProgressStream
                 
                 for try await progress in progressStream {
-                    guard !Task.isCancelled, !self.isCancelled else { break }
+                    guard !Task.isCancelled, !self.cancelFlag.isSet else { break }
                     
                     // FluidAudio reports 0.0-1.0, we map to 0.05-0.95
                     let scaledProgress = 0.05 + Float(progress) * 0.90
@@ -73,19 +75,31 @@ class FluidAudioEngine: TranscriptionEngine {
             progressTask = nil
         }
         
-        // Perform actual transcription - FluidAudio will emit progress automatically
-        // FluidAudio 0.15.x requires an explicit decoder state per transcription.
-        var decoderState = try TdtDecoderState(decoderLayers: await asrManager.decoderLayerCount)
-        let result = try await asrManager.transcribe(url, decoderState: &decoderState)
-        
-        guard !isCancelled else {
+        // Perform actual transcription - FluidAudio will emit progress automatically.
+        // Run it as a tracked task: `transcriptionTask` was previously declared and
+        // cancelled but never assigned, which made cancellation a silent no-op here
+        // and left a full ANE/CPU workload running after the user cancelled.
+        let task = Task<String, Error> {
+            // FluidAudio 0.15.x requires an explicit decoder state per transcription.
+            var decoderState = try TdtDecoderState(decoderLayers: await asrManager.decoderLayerCount)
+            try Task.checkCancellation()
+            let result = try await asrManager.transcribe(url, decoderState: &decoderState)
+            try Task.checkCancellation()
+            return result.text
+        }
+        transcriptionTask = task
+        defer { transcriptionTask = nil }
+
+        let rawText = try await task.value
+
+        guard !cancelFlag.isSet else {
             throw CancellationError()
         }
-        
+
         // Finalize
         onProgressUpdate?(0.95)
-        
-        var processedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var processedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         
         if settings.shouldApplyAsianAutocorrect && !processedText.isEmpty {
             processedText = AutocorrectWrapper.format(processedText)
@@ -97,7 +111,7 @@ class FluidAudioEngine: TranscriptionEngine {
     }
     
     func cancelTranscription() {
-        isCancelled = true
+        cancelFlag.isSet = true
         progressTask?.cancel()
         progressTask = nil
         transcriptionTask?.cancel()

@@ -136,12 +136,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    @Published var useAsianAutocorrect: Bool {
-        didSet {
-            AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
-        }
-    }
-    
     @Published var modifierOnlyHotkey: ModifierKey {
         didSet {
             AppPreferences.shared.modifierOnlyHotkey = modifierOnlyHotkey.rawValue
@@ -216,7 +210,6 @@ class SettingsViewModel: ObservableObject {
         self.beamSize = prefs.beamSize
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
-        self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.mouseButtonHotkey = MouseButton(rawValue: prefs.mouseButtonHotkey) ?? .none
         self.holdToRecord = prefs.holdToRecord
@@ -617,8 +610,6 @@ func huggingFaceOwner(fromPageURL url: URL) -> String? {
 }
 
 struct Settings {
-    static let asianLanguages: Set<String> = ["zh", "ja", "ko"]
-    
     var selectedLanguage: String
     var suppressBlankAudio: Bool
     var showTimestamps: Bool
@@ -627,14 +618,12 @@ struct Settings {
     var initialPrompt: String
     var useBeamSearch: Bool
     var beamSize: Int
-    var useAsianAutocorrect: Bool
     
-    var isAsianLanguage: Bool {
-        Settings.asianLanguages.contains(selectedLanguage)
-    }
-    
-    var shouldApplyAsianAutocorrect: Bool {
-        isAsianLanguage && useAsianAutocorrect
+    /// Italian-only deterministic corrections. Gated on an explicit "it": with
+    /// "auto" the language is not known here, and these rules must never run on
+    /// another language.
+    var shouldApplyItalianCorrections: Bool {
+        selectedLanguage == "it"
     }
     
     init() {
@@ -647,7 +636,6 @@ struct Settings {
         self.initialPrompt = prefs.initialPrompt
         self.useBeamSearch = prefs.useBeamSearch
         self.beamSize = prefs.beamSize
-        self.useAsianAutocorrect = prefs.useAsianAutocorrect
     }
 }
 
@@ -889,17 +877,6 @@ struct SettingsView: View {
                         .cornerRadius(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        if Settings.asianLanguages.contains(viewModel.selectedLanguage) {
-                            HStack {
-                                Text("Use Asian Autocorrect")
-                                    .font(.subheadline)
-                                Spacer()
-                                Toggle("", isOn: $viewModel.useAsianAutocorrect)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                    .labelsHidden()
-                            }
-                            .padding(.top, 4)
-                        }
                     }
                 }
                 .padding()

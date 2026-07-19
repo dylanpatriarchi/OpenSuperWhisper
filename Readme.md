@@ -1,12 +1,50 @@
-# OpenSuperWhisper
+# OpenSuperWhisper 🇮🇹
 
-OpenSuperWhisper is a macOS application that provides real-time audio transcription using the Whisper model. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
+**Dettatura vocale per macOS, con l'italiano come lingua di riferimento.**
 
-> **This is a fork** of [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) with a set of correctness fixes applied on top. See [Fixes in this fork](#fixes-in-this-fork). Transcription is fully on-device — there is no API key and no network inference; the network is used only to download models.
+A macOS dictation app built around Italian. It transcribes locally, on your Mac — there is
+no API key and no network inference; the network is used only to download models.
+
+> **Fork** di [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper).
+> L'upstream è un'app multilingua generalista; **questo fork ha l'italiano come focus** —
+> vedi [Focus sull'italiano](#focus-sullitaliano) e [Fixes in this fork](#fixes-in-this-fork).
 
 <p align="center">
 <img src="docs/image.png" width="400" /> <img src="docs/image_indicator.png" width="400" />
 </p>
+
+## Focus sull'italiano
+
+Questo fork è pensato per **chi detta in italiano**. Non significa che le altre lingue
+siano state rimosse — Whisper e Parakeet continuano a supportarle tutte, e restano
+selezionabili. Significa che **le scelte di prodotto vengono fatte guardando l'italiano**.
+
+In concreto:
+
+- **Gli anglicismi non sono errori.** In italiano parlato "meeting", "call", "deadline",
+  "budget" sono normali. Non vengono tradotti né "corretti": vanno trascritti come li hai
+  detti. Lo stesso vale per termini presi da altre lingue.
+- **Niente logica specifica per lingue asiatiche.** L'autocorrect CJK dell'upstream
+  (spaziatura fra caratteri cinesi/giapponesi e latini, punteggiatura full-width) è stato
+  rimosso: non si applica all'italiano e trascinava l'intera toolchain Rust nel build.
+- **Autocorrect italiano a bassa latenza** *(fatto)* — `ItalianTextCorrector` applica
+  correzioni deterministiche su ogni dettatura: nessuna chiamata a un modello, quindi
+  costo in microsecondi. Contiene **solo regole sempre-vere**: accenti la cui forma
+  senza accento non è una parola italiana (`perche` → `perché`, `piu` → `più`,
+  `citta` → `città`), grafie mai corrette (`pò` → `po'`, `qual'è` → `qual è`,
+  `daccordo` → `d'accordo`) e spazi prima della punteggiatura.
+  Tutto ciò che richiede contesto è **escluso di proposito**: `e`/`è`, `si`/`sì`,
+  `la`/`là`, `da`/`dà` hanno due grafie entrambe valide, e una regola cieca
+  cambierebbe il significato della frase. Quel lavoro spetta al livello LLM.
+- **In arrivo:**
+  - **Riformulazione con LLM locale** — livello separato e opzionale, per ripulire le
+    autocorrezioni del parlato. Da *"domani alle 10 non ci sarò, ah no, non è vero, alle
+    10.30"* a *"domani non ci sarò alle 10.30"*. Whisper e Parakeet sono modelli di
+    trascrizione: riportano fedelmente quello che hai detto e non faranno mai questo
+    lavoro. Serve un modello a parte, anch'esso in locale.
+
+In entrambi i casi vale una regola: **il testo grezzo viene sempre conservato** accanto a
+quello corretto. Alterare in silenzio quello che hai dettato è peggio che non fare nulla.
 
 ## Features
 
@@ -17,8 +55,7 @@ OpenSuperWhisper is a macOS application that provides real-time audio transcript
 - ✊ Hold-to-record mode — hold the shortcut, modifier key or mouse button to record, release to stop
 - 📁 Drag & drop audio files for transcription with queue processing
 - 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
-- 🌍 Support for multiple languages with auto-detection
-- 🇯🇵🇨🇳🇰🇷 Asian language autocorrect ([autocorrect](https://github.com/huacnlee/autocorrect))
+- 🌍 Multiple languages with auto-detection — Italian is the focus, not a restriction
 
 ## Installation
 
@@ -57,7 +94,7 @@ Then:
     git clone git@github.com:dylanpatriarchi/OpenSuperWhisper.git
     cd OpenSuperWhisper
     git submodule update --init --recursive
-    brew install cmake libomp rust ruby
+    brew install cmake libomp ruby
     gem install xcpretty
     ./run.sh build
 
@@ -93,11 +130,19 @@ Applied in [#1](https://github.com/dylanpatriarchi/OpenSuperWhisper/pull/1):
 - Event taps no longer leak a mach port on every hotkey settings change.
 - `run.sh` no longer reports success when the build actually failed.
 
-## Contributing
+## Roadmap
 
-Contributions are welcome! Please feel free to submit pull requests or create issues for bugs and feature requests.
+Questo fork:
 
-### Contribution TODO list
+- [x] Rimozione dell'autocorrect CJK e della toolchain Rust dal build
+- [x] **Autocorrect italiano a bassa latenza** — `ItalianTextCorrector`: accenti non
+      ambigui, apostrofi, spaziatura. Deterministico, nessun modello, solo regole
+      sempre-vere; le ambiguità (`e`/`è`, `si`/`sì`) sono lasciate al livello LLM
+- [ ] **Riformulazione con LLM locale** — rimozione delle autocorrezioni del parlato,
+      opzionale e dietro toggle, con il testo grezzo sempre conservato
+- [ ] Confronto Whisper vs Parakeet sull'italiano, per capire quale tenere come default
+
+Ereditati dall'upstream:
 
 - [ ] Streaming transcription
 - [ ] Custom dictionary / keyword boosting ([#19](https://github.com/Starmel/OpenSuperWhisper/issues/19))
@@ -106,6 +151,10 @@ Contributions are welcome! Please feel free to submit pull requests or create is
 - [x] Background app ([#8](https://github.com/Starmel/OpenSuperWhisper/issues/8))
 - [x] Support long-press single key audio recording ([#18](https://github.com/Starmel/OpenSuperWhisper/issues/18))
 
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or create issues for bugs and feature requests.
+
 ## License
 
 OpenSuperWhisper is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
@@ -113,6 +162,12 @@ OpenSuperWhisper is licensed under the MIT License. See the [LICENSE](LICENSE) f
 ## Whisper Models
 
 You can download Whisper model files (`.bin`) from the [Whisper.cpp Hugging Face repository](https://huggingface.co/ggerganov/whisper.cpp/tree/main). Place the downloaded `.bin` files in the app's models directory. On first launch, the app will attempt to copy a default model automatically, but you can add more models manually.
+
+**Per l'italiano** serve un modello *multilingue*: i modelli `.en` (`tiny.en`, `base.en`…)
+sono solo inglese. Dalle impostazioni, **"Turbo V3 large"** è un default ragionevole
+(~1.6 GB). **"Parakeet v3"** supporta anch'esso l'italiano ed è più leggero e veloce.
+Entrambi i motori sono nell'app, quindi puoi confrontarli sulla tua voce e tenere quello
+che ti rende meglio.
 
 ### Hebrew (ivrit.ai)
 

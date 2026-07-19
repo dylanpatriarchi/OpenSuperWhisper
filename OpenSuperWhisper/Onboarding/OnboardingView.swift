@@ -21,12 +21,6 @@ class OnboardingViewModel: ObservableObject {
         }
     }
     
-    @Published var useAsianAutocorrect: Bool {
-        didSet {
-            AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
-        }
-    }
-    
     @Published var selectedShortcut: OnboardingShortcutOption {
         didSet {
             switch selectedShortcut {
@@ -53,7 +47,6 @@ class OnboardingViewModel: ObservableObject {
         let systemLanguage = LanguageUtil.getSystemLanguage()
         AppPreferences.shared.whisperLanguage = systemLanguage
         self.selectedLanguage = systemLanguage
-        self.useAsianAutocorrect = AppPreferences.shared.useAsianAutocorrect
         
         let currentHotkey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
         if currentHotkey == .none && !AppPreferences.shared.hasCompletedOnboarding {
@@ -362,13 +355,6 @@ struct OnboardingView: View {
                     .frame(width: 150)
                 }
                 
-                if Settings.asianLanguages.contains(viewModel.selectedLanguage) {
-                    Toggle(isOn: $viewModel.useAsianAutocorrect) {
-                        Text("Use Asian Autocorrect")
-                            .font(.caption)
-                    }
-                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)

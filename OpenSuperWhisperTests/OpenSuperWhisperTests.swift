@@ -189,6 +189,108 @@ final class WhisperEngineConversionTests: XCTestCase {
     }
 }
 
+/// Exercises `TranscriptionService.transcribeAudio` end to end — the path the
+/// app actually uses. `WhisperStateIsolationTests` below drives
+/// `MyWhisperContext` directly and so does not cover the service's engine
+/// loading or its serialization of concurrent transcriptions.
+@MainActor
+final class TranscriptionServicePipelineTests: XCTestCase {
+
+    private static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
+    private var savedModelPath: String?
+    private var savedEngine: String?
+
+    override func setUp() {
+        super.setUp()
+        savedModelPath = AppPreferences.shared.selectedWhisperModelPath
+        savedEngine = AppPreferences.shared.selectedEngine
+    }
+
+    override func tearDown() {
+        AppPreferences.shared.selectedWhisperModelPath = savedModelPath
+        AppPreferences.shared.selectedEngine = savedEngine ?? "whisper"
+        super.tearDown()
+    }
+
+    /// Points the shared service at the tiny model and waits for it to load.
+    private func makeLoadedService() async throws -> (TranscriptionService, URL) {
+        let modelURL = Self.repoRoot.appendingPathComponent("ggml-tiny.en.bin")
+        let audioURL = Self.repoRoot.appendingPathComponent("jfk.wav")
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: modelURL.path)
+                && FileManager.default.fileExists(atPath: audioURL.path),
+            "tiny model / jfk sample not present in repo root"
+        )
+
+        AppPreferences.shared.selectedEngine = "whisper"
+        AppPreferences.shared.selectedWhisperModelPath = modelURL.path
+
+        let service = TranscriptionService.shared
+        service.reloadEngine()
+
+        // Engine loading is asynchronous; transcribing before it finishes throws
+        // contextInitializationFailed.
+        let deadline = Date().addingTimeInterval(60)
+        while service.isLoading && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(service.isLoading, "Engine did not finish loading in time")
+
+        return (service, audioURL)
+    }
+
+    func testServiceTranscribesThroughFullPipeline() async throws {
+        let (service, audioURL) = try await makeLoadedService()
+
+        let text = try await service.transcribeAudio(url: audioURL, settings: Settings())
+
+        XCTAssertTrue(
+            text.lowercased().contains("your country"),
+            "Unexpected transcription through TranscriptionService: \(text)"
+        )
+        XCTAssertFalse(service.isTranscribing, "isTranscribing must be cleared when done")
+    }
+
+    /// Recording while the engine is still loading used to be swallowed: the
+    /// service threw contextInitializationFailed and the error was only printed,
+    /// so the user saw nothing at all. Callers now gate on isEngineReady.
+    func testEngineIsNotReadyWhileLoading() async throws {
+        let (service, _) = try await makeLoadedService()
+        XCTAssertTrue(service.isEngineReady, "Engine should be ready once loaded")
+
+        // A path that cannot load leaves the service without an engine.
+        AppPreferences.shared.selectedWhisperModelPath = "/nonexistent/model.bin"
+        service.reloadEngine()
+
+        let deadline = Date().addingTimeInterval(30)
+        while service.isLoading && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertFalse(
+            service.isEngineReady,
+            "Engine must not report ready when no model could be loaded"
+        )
+    }
+
+    /// The indicator and queue flows can both reach `transcribeAudio`; a single
+    /// whisper context must never be entered twice concurrently.
+    func testConcurrentTranscriptionsAreSerializedAndBothSucceed() async throws {
+        let (service, audioURL) = try await makeLoadedService()
+
+        async let first = service.transcribeAudio(url: audioURL, settings: Settings())
+        async let second = service.transcribeAudio(url: audioURL, settings: Settings())
+        let (a, b) = try await (first, second)
+
+        XCTAssertTrue(a.lowercased().contains("your country"), "First run: \(a)")
+        XCTAssertTrue(b.lowercased().contains("your country"), "Second run: \(b)")
+        XCTAssertEqual(a, b, "Serialized runs over the same audio must agree")
+    }
+}
+
 final class WhisperStateIsolationTests: XCTestCase {
 
     private static let repoRoot = URL(fileURLWithPath: #filePath)

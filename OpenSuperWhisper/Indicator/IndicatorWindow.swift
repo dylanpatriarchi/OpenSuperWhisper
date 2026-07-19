@@ -9,6 +9,7 @@ enum RecordingState {
     case decoding
     case busy
     case noMicrophone
+    case modelLoading
 }
 
 @MainActor
@@ -89,6 +90,15 @@ class IndicatorViewModel: ObservableObject {
     func startRecording() {
         if isTranscriptionBusy {
             showBusyMessage()
+            return
+        }
+
+        // Loading a large model takes several seconds, during which
+        // `transcribeAudio` throws contextInitializationFailed and the error is
+        // only printed — the user records, releases and sees nothing at all.
+        // Say so instead of swallowing the dictation.
+        guard transcriptionService.isEngineReady else {
+            showAutoDismissingMessage(.modelLoading)
             return
         }
 
@@ -405,6 +415,18 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
 
                     Text("No microphone")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .modelLoading:
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Loading model...")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
                 }

@@ -39,6 +39,14 @@ class TranscriptionService: ObservableObject {
         loadEngine()
     }
 
+    /// Whether a transcription can start right now. Loading a multi-gigabyte
+    /// model takes seconds; until it completes `transcribeAudio` throws
+    /// `contextInitializationFailed`, so callers should check this and tell the
+    /// user rather than discarding the dictation silently.
+    var isEngineReady: Bool {
+        currentEngine != nil && !isLoading
+    }
+
     func cancelTranscription() {
         isCancelled = true
         currentEngine?.cancelTranscription()
@@ -78,6 +86,11 @@ class TranscriptionService: ObservableObject {
             } catch {
                 await MainActor.run {
                     guard let self, self.engineLoadGeneration == generation else { return }
+                    // Drop any previously loaded engine: preferences now point at
+                    // the model that failed to load, so keeping the old one would
+                    // silently transcribe with a different model than the one
+                    // selected. Better to report "not ready".
+                    self.currentEngine = nil
                     self.isLoading = false
                     print("Failed to load engine: \(error)")
                 }

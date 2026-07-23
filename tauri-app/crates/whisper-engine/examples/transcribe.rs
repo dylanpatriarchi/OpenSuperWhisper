@@ -1,12 +1,12 @@
 //! Phase-1 proof-of-concept CLI: load a ggml model, transcribe a 16kHz mono
 //! WAV, print the text.
 //!
-//! From the repo root:
+//! From `tauri-app/`:
 //! ```sh
 //! cargo run -p whisper-engine --example transcribe -- \
-//!     --model ../../../ggml-tiny.en.bin \
-//!     --vad ../../../OpenSuperWhisper/ggml-silero-v5.1.2.bin \
-//!     --wav ../../../jfk.wav
+//!     --model resources/ggml-tiny.en.bin \
+//!     --vad resources/ggml-silero-v5.1.2.bin \
+//!     --wav testdata/jfk.wav
 //! ```
 
 use std::path::PathBuf;

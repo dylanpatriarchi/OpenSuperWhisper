@@ -6,15 +6,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "swift"
-    directory: "/"
+  - package-ecosystem: "cargo"
+    directory: "/tauri-app"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "bundler"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-  - package-ecosystem: "gitsubmodule"
-    directory: "/"
+  - package-ecosystem: "npm"
+    directory: "/tauri-app"
     schedule:
       interval: "weekly"

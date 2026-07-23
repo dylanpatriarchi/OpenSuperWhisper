@@ -19,19 +19,19 @@ models into the new app.
 - **App identity**: new Tauri app gets its own identifier
   (`com.dylanpatriarchi.italiansuperwhisper`, `tauri-app/src-tauri/tauri.conf.json`),
   deliberately different from the Swift app's legacy
-  `ru.starmel.OpenSuperWhisper` (see `docs/HANDOFF.md`).
+  `ru.starmel.OpenSuperWhisper` (see the Swift-era docs on `main`).
 - **`FluidAudioEngine`** (the alternate CoreML-based ASR engine, Swift-only,
   no cross-platform equivalent) is dropped from scope. whisper.cpp becomes the
   only ASR engine — this is implied by the Windows-compat goal itself, not an
   extra cut.
-- **`agent/`** (original author's automation harness) stays untouched,
-  out of scope either way, per the existing note in `docs/HANDOFF.md`.
+- **`agent/`** (original author's automation harness) was removed from this
+  branch along with the rest of the Swift-era tree; it still exists on `main`.
 
 ## Still open (decide when the relevant phase starts, not before)
 
-- Exact GGUF model for reformulation — shortlist 2-3 small (2-4B) Italian-capable
-  instruct models, validate against the three test sentences in
-  `docs/HANDOFF.md` before locking one in.
+- ~~Exact GGUF model for reformulation~~ **decided**: `gemma-2-2b-it`
+  Q4_K_M (bartowski GGUF build), validated empirically against the three
+  canonical test sentences (see phase 7 below).
 - `whisper-rs` crate vs hand-rolled bindgen against `Bridge.h`/`whisper.h` —
   depends on whether `whisper-rs` exposes the VAD API
   (`whisper_vad_init_from_file_with_params`, `whisper_vad_segments_from_samples`)
@@ -173,11 +173,19 @@ Each phase is an independently shippable/testable milestone.
    settings UI.
 6. **ItalianTextCorrector port** — **✅ done** (`crates/italian-corrector`,
    12 tests ported 1:1).
-7. **llama.cpp reformulation port** — **🟡 in progress**: the sanitize()
-   safety contract and prompt are ported and tested
-   (`crates/reformulation`, 13 tests); the llama.cpp engine wiring + GGUF
-   model selection + empirical validation against `docs/HANDOFF.md`'s test
-   sentences remain.
+7. **llama.cpp reformulation port** — **✅ done**: sanitize() contract and
+   prompt ported and tested; llama-cpp-2 engine (Metal on macOS, greedy
+   decoding, chat-template with Gemma fallback) wired into the pipeline with
+   lazy per-path caching, raw transcription persisted only when it differs.
+   **Empirically validated** with gemma-2-2b-it Q4_K_M against the three
+   canonical sentences (the "nobody has ever run the model" risk the Swift
+   handoff flagged is now closed):
+   - *"Sposta la call di domani dopo il meeting con il team, tanto la
+     deadline del budget è venerdì."* → unchanged, all anglicisms survive.
+   - *"Domani alle 10 non ci sarò, ah no, non è vero, alle 10 e mezza."* →
+     *"Domani alle 10.30 non ci sarò."* (self-correction resolved; note the
+     stylistic "10.30" normalization of "10 e mezza").
+   - Already-clean text → byte-identical.
 8. **Polish/packaging** — **🟡 partial**: `.app`/`.dmg` bundle builds and
    launches (storage provisioning verified), real app icon, macOS 14
    minimum, `NSMicrophoneUsageDescription` declared, CI running tests on

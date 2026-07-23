@@ -342,6 +342,15 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::default())
+        // Closing the window hides to the tray instead of quitting,
+        // mirroring the Swift app's hide-to-menu-bar behavior; quit lives
+        // in the tray menu.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             match storage::init(&handle) {

@@ -173,10 +173,53 @@ impl KeySender for SystemKeySender {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Ctrl+V via `SendInput`. Unlike macOS, no keyboard-layout keycode lookup
+/// is needed: `VK_V` is a virtual key, which Windows maps through the active
+/// layout itself. Compiled and tested by CI on windows-latest; needs a
+/// manual smoke test on real Windows (see docs/TAURI_REWRITE.md phase 3).
+#[cfg(target_os = "windows")]
 impl KeySender for SystemKeySender {
     fn send_paste(&mut self) -> Result<(), PasteError> {
-        // Windows: SendInput(Ctrl+V) lands with the Windows port (phase 3).
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+            KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_V,
+        };
+
+        fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: vk,
+                        wScan: 0,
+                        dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            }
+        }
+
+        let inputs = [
+            key(VK_CONTROL, false),
+            key(VK_V, false),
+            key(VK_V, true),
+            key(VK_CONTROL, true),
+        ];
+        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+        if sent != inputs.len() as u32 {
+            return Err(PasteError::Keystroke(format!(
+                "SendInput injected {sent}/{} events",
+                inputs.len()
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+impl KeySender for SystemKeySender {
+    fn send_paste(&mut self) -> Result<(), PasteError> {
         Err(PasteError::Unsupported)
     }
 }

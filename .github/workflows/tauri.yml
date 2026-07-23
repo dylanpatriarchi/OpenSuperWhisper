@@ -1,0 +1,55 @@
+name: Tauri app
+
+on:
+  push:
+    paths:
+      - "tauri-app/**"
+      - ".github/workflows/tauri.yml"
+  pull_request:
+    paths:
+      - "tauri-app/**"
+      - ".github/workflows/tauri.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tauri-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Tauri's Linux deps are not needed: we only target macOS and Windows.
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-app
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend type-check and build
+        run: npm run build
+
+      # Unlike the Swift app's CI (build-only, see docs/HANDOFF.md), tests
+      # actually run here. --workspace covers every crate: whisper-engine,
+      # audio-capture, paste-sim, italian-corrector, reformulation,
+      # recordings-store, model-manager and the Tauri backend.
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings

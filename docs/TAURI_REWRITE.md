@@ -141,26 +141,48 @@ decimals/URLs), capitalization-preserving accent restoration.
 Each phase is an independently shippable/testable milestone.
 
 0. **Scaffold** — branch + empty Tauri 2.x shell (`tauri-app/`), coexisting
-   with the untouched Swift project. *(done — see this branch's first commits.)*
+   with the untouched Swift project. **✅ done**
 1. **whisper.cpp FFI proof-of-concept** — a Rust CLI that loads a `.bin` model
    and transcribes a fixed WAV, matching `WhisperEngine.swift`'s call sequence
    (VAD gating, abort/progress callbacks, `[MUSIC]`/`[BLANK_AUDIO]` stripping).
-2. **macOS core loop** — record → transcribe → paste, minimal UI. Introduces
-   the `audio-capture` (`cpal`) and `paste-sim` crates.
+   **✅ done** (`crates/whisper-engine`, verified against jfk.wav incl.
+   mid-run abort; note: whisper-rs 0.16.0's `set_abort_callback_safe` has an
+   upstream bug worked around in `transcribe.rs` — see the comment there).
+2. **macOS core loop** — record → transcribe → paste, minimal UI.
+   **✅ done** (`crates/audio-capture` on cpal+rubato, `crates/paste-sim`
+   with mock-tested restore/coalescing, Tauri commands + React UI; mic smoke
+   test verified against real hardware).
 3. **Windows port of the same core loop** — same crates, WASAPI via `cpal`,
-   `SendInput`-based paste, CI on `windows-latest`.
-4. **Global hotkeys + floating indicator + tray**, both OSes — the riskiest
-   native-integration phase (three hotkey trigger modes, click-through overlay
-   window, Accessibility/UI-Automation caret anchoring).
-5. **Settings/onboarding/data-layer/history UI parity** — full React/TS
-   screens, SQLite migrations, model download manager.
-6. **ItalianTextCorrector port** — low risk, wire into the transcription path.
-7. **llama.cpp reformulation port** — highest-risk phase: GGUF model
-   selection + empirical validation against `docs/HANDOFF.md`'s test
-   sentences, `sanitize()` contract ported exactly.
-8. **Polish/packaging** — installers (`.dmg`/`.app`, `.msi`/NSIS), code
-   signing, CI on both OSes actually running tests (not just building, unlike
-   the existing Swift CI per `docs/HANDOFF.md`).
+   `SendInput`-based paste. **⏳ pending**: CI compiles and tests on
+   `windows-latest`; `paste-sim`'s Windows `KeySender` still returns
+   `Unsupported` and needs the `SendInput` implementation + a manual test on
+   a real Windows machine.
+4. **Global hotkeys + floating indicator + tray**, both OSes.
+   **🟡 partial**: hold-to-record/toggle hotkey done via
+   tauri-plugin-global-shortcut (default Alt+Backquote, 0.3s threshold ported
+   from `ShortcutManager.swift`); tray icon with open/quit done. Missing:
+   modifier-only and mouse-button trigger modes (need CGEventTap /
+   low-level hooks), the floating click-through indicator window, and the
+   double-press-to-trigger option.
+5. **Settings/data-layer/history UI parity** — **🟡 mostly done**:
+   `crates/recordings-store` (SQLite, v1→v3 migrations, 12 tests),
+   `crates/model-manager` (catalog + validated resumable downloads, 10
+   tests), settings.json persistence, history and model-management UI,
+   bundled tiny+VAD models provisioned on first run. Missing: onboarding
+   flow, file-drop transcription, audio playback in history, retention
+   settings UI.
+6. **ItalianTextCorrector port** — **✅ done** (`crates/italian-corrector`,
+   12 tests ported 1:1).
+7. **llama.cpp reformulation port** — **🟡 in progress**: the sanitize()
+   safety contract and prompt are ported and tested
+   (`crates/reformulation`, 13 tests); the llama.cpp engine wiring + GGUF
+   model selection + empirical validation against `docs/HANDOFF.md`'s test
+   sentences remain.
+8. **Polish/packaging** — **🟡 partial**: `.app`/`.dmg` bundle builds and
+   launches (storage provisioning verified), real app icon, macOS 14
+   minimum, `NSMicrophoneUsageDescription` declared, CI running tests on
+   macOS+Windows. Missing: code signing decisions, Windows installer
+   validation, release automation.
 
 ## Verification per phase
 

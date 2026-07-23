@@ -191,7 +191,7 @@ fn speech_only_samples(samples: &[f32], segments: &[(i64, i64)]) -> Vec<f32> {
         }
         result.extend_from_slice(&samples[start..end]);
         if !is_last {
-            result.extend(std::iter::repeat(0.0f32).take(GAP_SAMPLES));
+            result.extend(std::iter::repeat_n(0.0f32, GAP_SAMPLES));
         }
     }
     result

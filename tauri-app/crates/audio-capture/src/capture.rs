@@ -139,7 +139,7 @@ fn open_stream(
     let stream = match sample_format {
         cpal::SampleFormat::F32 => device
             .build_input_stream(
-                config.clone(),
+                config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     buffer.lock().unwrap().extend_from_slice(data);
                 },
@@ -149,7 +149,7 @@ fn open_stream(
             .map_err(|e| CaptureError::StreamBuild(e.to_string()))?,
         cpal::SampleFormat::I16 => device
             .build_input_stream(
-                config.clone(),
+                config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     let mut buf = buffer.lock().unwrap();
                     buf.extend(data.iter().map(|&s| s as f32 / 32768.0));
@@ -160,7 +160,7 @@ fn open_stream(
             .map_err(|e| CaptureError::StreamBuild(e.to_string()))?,
         cpal::SampleFormat::U16 => device
             .build_input_stream(
-                config.clone(),
+                config,
                 move |data: &[u16], _: &cpal::InputCallbackInfo| {
                     let mut buf = buffer.lock().unwrap();
                     buf.extend(data.iter().map(|&s| (s as f32 - 32768.0) / 32768.0));

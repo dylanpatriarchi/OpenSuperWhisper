@@ -16,7 +16,6 @@ use crate::dictation::DictationSettings;
 pub struct Paths {
     pub recordings_dir: PathBuf,
     pub settings_path: PathBuf,
-    pub vad_model_path: PathBuf,
 }
 
 pub struct Storage {
@@ -64,7 +63,6 @@ pub fn init(app: &AppHandle) -> Result<(Storage, DictationSettings), String> {
         paths: Paths {
             recordings_dir,
             settings_path,
-            vad_model_path,
         },
         store: Arc::new(store),
         models: Arc::new(models),

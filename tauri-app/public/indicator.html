@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        user-select: none;
+        cursor: default;
+      }
+      .pill {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: rgba(20, 20, 20, 0.92);
+        color: #fff;
+        border-radius: 22px;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #e74c3c;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .dot.busy {
+        background: #f39c12;
+        animation: none;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pill">
+      <div class="dot" id="dot"></div>
+      <span id="label">Sto ascoltando…</span>
+    </div>
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const dot = document.getElementById("dot");
+      const label = document.getElementById("label");
+      listen("dictation-state", (e) => {
+        if (e.payload.state === "recording") {
+          dot.classList.remove("busy");
+          label.textContent = "Sto ascoltando…";
+        } else if (e.payload.state === "transcribing") {
+          dot.classList.add("busy");
+          label.textContent = "Trascrivo…";
+        }
+      });
+      listen("transcribe-progress", (e) => {
+        if (dot.classList.contains("busy")) {
+          label.textContent = `Trascrivo… ${Math.round(e.payload.progress * 100)}%`;
+        }
+      });
+    </script>
+  </body>
+</html>

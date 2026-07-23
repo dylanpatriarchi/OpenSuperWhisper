@@ -5,7 +5,9 @@
 //! to say. This crate holds the guard between the model's output and the
 //! user's text: the system prompt, the decoding constants, and [`sanitize`],
 //! which makes sure a failed reformulation never loses the dictation. The
-//! llama.cpp engine wiring lives elsewhere (later phase).
+//! llama.cpp engine wiring lives in [`engine`].
+
+pub mod engine;
 
 /// The system prompt. Two things matter for Italian dictation and are easy
 /// to get wrong, so they are stated explicitly:
@@ -23,7 +25,8 @@ pub const INSTRUCTIONS: &str = "Sei un correttore di dettature vocali in italian
 pub const SHORT_DICTATION_ALLOWANCE: usize = 120;
 
 /// Deterministic decoding: this is a rewriting task, so sampling would only
-/// add variation we do not want. (For the future engine wiring.)
+/// add variation we do not want. `TEMPERATURE` 0.0 is realised in [`engine`]
+/// as greedy decoding.
 pub const MAX_TOKENS: u32 = 512;
 pub const TEMPERATURE: f32 = 0.0;
 

@@ -392,6 +392,25 @@ pub fn run() {
             }
 
             setup_tray(app)?;
+
+            // Pre-built hidden, mirroring the Swift warmUp(): showing it on
+            // the first dictation must not pay webview-creation latency.
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "indicator",
+                tauri::WebviewUrl::App("indicator.html".into()),
+            )
+            .visible(false)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .inner_size(170.0, 44.0)
+            .shadow(false)
+            .focused(false)
+            .build()?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

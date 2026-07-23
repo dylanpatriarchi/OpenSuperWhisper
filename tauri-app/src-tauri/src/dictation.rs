@@ -62,6 +62,35 @@ struct ProgressPayload {
 
 pub fn emit_state(app: &AppHandle, state: &'static str) {
     let _ = app.emit("dictation-state", StatePayload { state });
+    update_indicator(app, state);
+}
+
+/// Shows the floating pill near the mouse cursor while recording or
+/// transcribing, hides it when idle. A light stand-in for the Swift
+/// NSPanel indicator (`IndicatorWindowManager`): no caret tracking or
+/// click-through yet — cursor-anchored is the documented cross-platform
+/// fallback (docs/TAURI_REWRITE.md).
+fn update_indicator(app: &AppHandle, state: &str) {
+    let Some(win) = app.get_webview_window("indicator") else {
+        return;
+    };
+    match state {
+        "recording" => {
+            if let Ok(pos) = app.cursor_position() {
+                let _ = win.set_position(tauri::PhysicalPosition::new(
+                    (pos.x + 16.0) as i32,
+                    (pos.y + 16.0) as i32,
+                ));
+            }
+            let _ = win.show();
+        }
+        "transcribing" => {
+            let _ = win.show();
+        }
+        _ => {
+            let _ = win.hide();
+        }
+    }
 }
 
 pub fn emit_progress(app: &AppHandle, progress: f32) {

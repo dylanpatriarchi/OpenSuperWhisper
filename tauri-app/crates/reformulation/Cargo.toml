@@ -4,3 +4,19 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+thiserror = "2"
+# llama-cpp-2's `token_to_piece` streams token bytes through an
+# encoding_rs UTF-8 decoder so multi-byte characters split across
+# tokens (common with Italian accents) reassemble correctly.
+encoding_rs = "0.8"
+
+# llama-cpp-2 builds llama.cpp from source (cmake). On macOS the `metal`
+# feature offloads to the Apple GPU; everywhere else plain CPU.
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1.152", features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = "0.1.152"
+
+[dev-dependencies]
+tempfile = "3"

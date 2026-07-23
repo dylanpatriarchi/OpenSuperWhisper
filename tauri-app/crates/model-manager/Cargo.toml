@@ -1,0 +1,13 @@
+[package]
+name = "model-manager"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+whisper-engine = { path = "../whisper-engine" }
+reqwest = { version = "0.12", features = ["blocking"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

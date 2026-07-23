@@ -1,18 +1,27 @@
 //! Tauri backend: dictation core loop (record → transcribe → paste) driven
-//! either from the UI or from the global hotkey. Model paths arrive from the
-//! frontend for now; the model manager / app-data storage lands in phase 5.
+//! either from the UI or from the global hotkey, with SQLite history,
+//! model management and a tray icon.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use audio_capture::Recorder;
+use model_manager::{CatalogModel, DownloadProgress, AVAILABLE_MODELS};
 use paste_sim::SystemPaster;
-use tauri::{AppHandle, Manager, State};
+use recordings_store::Recording;
+use serde::Serialize;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use uuid::Uuid;
 use whisper_engine::transcribe::WhisperEngine;
 
 mod dictation;
+mod storage;
 use dictation::{emit_state, transcribe_pipeline, DictationSettings, HotkeyMachine};
+use storage::Storage;
 
 pub(crate) struct EngineCache {
     pub model_path: String,
@@ -27,7 +36,13 @@ pub(crate) struct AppState {
     pub paster: Mutex<Option<SystemPaster>>,
     pub settings: Mutex<DictationSettings>,
     pub hotkey_machine: HotkeyMachine,
+    pub storage: Mutex<Option<Storage>>,
+    pub download_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
+
+// ---------------------------------------------------------------------------
+// Recording commands
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -76,18 +91,24 @@ async fn stop_and_transcribe(app: AppHandle, paste_delay_ms: u64) -> Result<Stri
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let samples = recorder.stop().map_err(|e| e.to_string())?;
-        transcribe_pipeline(
+        let out = transcribe_pipeline(
             &app,
             samples,
             &settings,
             Duration::from_millis(paste_delay_ms),
-        )
+        );
+        emit_state(&app, "idle");
+        out
     })
     .await
     .map_err(|e| e.to_string())?;
 
     result
 }
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> DictationSettings {
@@ -106,17 +127,202 @@ fn set_settings(
         *current = settings.clone();
         changed
     };
+    if let Some(storage) = state.storage.lock().unwrap().as_ref() {
+        storage::save_settings(&storage.paths.settings_path, &settings);
+    }
     if hotkey_changed {
         register_hotkey(&app, &settings.hotkey)?;
     }
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn list_recordings(state: State<'_, AppState>) -> Result<Vec<Recording>, String> {
+    let storage = state.storage.lock().unwrap();
+    let storage = storage.as_ref().ok_or("storage not initialized")?;
+    storage.store.get_all().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_recording(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let storage = state.storage.lock().unwrap();
+    let storage = storage.as_ref().ok_or("storage not initialized")?;
+    storage
+        .store
+        .delete_recording(id)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ModelsInfo {
+    catalog: Vec<CatalogModel>,
+    installed: Vec<String>,
+    active_model_path: String,
+}
+
+#[tauri::command]
+fn models_info(state: State<'_, AppState>) -> Result<ModelsInfo, String> {
+    let storage = state.storage.lock().unwrap();
+    let storage = storage.as_ref().ok_or("storage not initialized")?;
+    let installed = storage
+        .models
+        .installed_models()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    Ok(ModelsInfo {
+        catalog: AVAILABLE_MODELS.to_vec(),
+        installed,
+        active_model_path: state.settings.lock().unwrap().model_path.clone(),
+    })
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DownloadEvent {
+    name: String,
+    bytes_downloaded: u64,
+    total_bytes: Option<u64>,
+    done: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn download_model(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let models = {
+        let storage = state.storage.lock().unwrap();
+        storage
+            .as_ref()
+            .ok_or("storage not initialized")?
+            .models
+            .clone()
+    };
+    let mut cancel_slot = state.download_cancel.lock().unwrap();
+    if cancel_slot.is_some() {
+        return Err("another download is already running".into());
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    *cancel_slot = Some(cancel.clone());
+    drop(cancel_slot);
+
+    std::thread::spawn(move || {
+        let emit = |payload: DownloadEvent| {
+            let _ = app.emit("model-download", payload);
+        };
+        let name_for_progress = name.clone();
+        let progress_app = app.clone();
+        let result = models.download_model(&name, cancel, move |p: DownloadProgress| {
+            let _ = progress_app.emit(
+                "model-download",
+                DownloadEvent {
+                    name: name_for_progress.clone(),
+                    bytes_downloaded: p.bytes_downloaded,
+                    total_bytes: p.total_bytes,
+                    done: false,
+                    error: None,
+                },
+            );
+        });
+        emit(DownloadEvent {
+            name: name.clone(),
+            bytes_downloaded: 0,
+            total_bytes: None,
+            done: true,
+            error: result.err().map(|e| e.to_string()),
+        });
+        let state = app.state::<AppState>();
+        state.download_cancel.lock().unwrap().take();
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_model_download(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(cancel) = state.download_cancel.lock().unwrap().as_ref() {
+        cancel.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_model(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let storage = state.storage.lock().unwrap();
+    let storage = storage.as_ref().ok_or("storage not initialized")?;
+    storage.models.delete_model(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn select_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<String, String> {
+    let path = {
+        let storage = state.storage.lock().unwrap();
+        let storage = storage.as_ref().ok_or("storage not initialized")?;
+        let path = storage.models.model_path(&name).map_err(|e| e.to_string())?;
+        if !path.is_file() {
+            return Err(format!("model {name} is not installed"));
+        }
+        path.to_string_lossy().into_owned()
+    };
+    let settings = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.model_path = path.clone();
+        settings.clone()
+    };
+    if let Some(storage) = state.storage.lock().unwrap().as_ref() {
+        storage::save_settings(&storage.paths.settings_path, &settings);
+    }
+    let _ = app.emit("settings-changed", settings);
+    Ok(path)
+}
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+
 fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     let gs = app.global_shortcut();
     gs.unregister_all().map_err(|e| e.to_string())?;
     gs.register(hotkey)
         .map_err(|e| format!("cannot register hotkey \"{hotkey}\": {e}"))?;
+    Ok(())
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let open_item = MenuItemBuilder::with_id("open", "Apri ItalianSuperWhisper").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Esci").build(app)?;
+    let menu = MenuBuilder::new(app).items(&[&open_item, &quit_item]).build()?;
+
+    let mut tray = TrayIconBuilder::new().menu(&menu).on_menu_event(|app, event| {
+        match event.id().as_ref() {
+            "open" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        }
+    });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
     Ok(())
 }
 
@@ -137,6 +343,16 @@ pub fn run() {
         )
         .manage(AppState::default())
         .setup(|app| {
+            let handle = app.handle().clone();
+            match storage::init(&handle) {
+                Ok((storage, settings)) => {
+                    let state = app.state::<AppState>();
+                    *state.storage.lock().unwrap() = Some(storage);
+                    *state.settings.lock().unwrap() = settings;
+                }
+                Err(e) => eprintln!("warning: storage init failed: {e}"),
+            }
+
             let hotkey = app
                 .state::<AppState>()
                 .settings
@@ -149,6 +365,8 @@ pub fn run() {
             if let Err(e) = register_hotkey(app.handle(), &hotkey) {
                 eprintln!("warning: {e}");
             }
+
+            setup_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -157,7 +375,14 @@ pub fn run() {
             recording_elapsed,
             stop_and_transcribe,
             get_settings,
-            set_settings
+            set_settings,
+            list_recordings,
+            delete_recording,
+            models_info,
+            download_model,
+            cancel_model_download,
+            delete_model,
+            select_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

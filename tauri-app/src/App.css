@@ -156,3 +156,86 @@ input.hotkey {
     border-color: #444;
   }
 }
+
+.section {
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+  padding-top: 0.75rem;
+}
+
+.section summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.history,
+.models {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history li,
+.models li {
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+
+.history li.empty {
+  background: none;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.history-text {
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.history-meta {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: #777;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.history-meta button,
+.model-actions button {
+  font-size: 0.75rem;
+  padding: 0.25em 0.7em;
+}
+
+.model-desc {
+  font-size: 0.85rem;
+  color: #777;
+  margin: 0.2rem 0 0.4rem;
+}
+
+.model-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+.badge {
+  margin-left: 0.5em;
+  font-size: 0.7rem;
+  background: #27ae60;
+  color: white;
+  border-radius: 4px;
+  padding: 0.1em 0.5em;
+  vertical-align: middle;
+}
+
+.badge.installed {
+  background: #7f8c8d;
+}
+
+.models progress {
+  width: 100%;
+}

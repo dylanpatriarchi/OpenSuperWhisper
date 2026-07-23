@@ -3,11 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
-// Dev-only defaults: the model manager (phase 5) will own real storage.
-const DEFAULT_MODEL = "/Users/dylan/OpenSuperWhisper/ggml-tiny.en.bin";
-const DEFAULT_VAD =
-  "/Users/dylan/OpenSuperWhisper/OpenSuperWhisper/ggml-silero-v5.1.2.bin";
-
 type Status = "idle" | "recording" | "transcribing";
 
 interface Settings {
@@ -20,24 +15,34 @@ interface Settings {
   hotkey: string;
 }
 
-const DEFAULT_SETTINGS: Settings = {
-  modelPath: DEFAULT_MODEL,
-  vadPath: DEFAULT_VAD,
-  language: "it",
-  applyItalianCorrections: true,
-  paste: true,
-  holdToRecord: true,
-  hotkey: "alt+Backquote",
-};
+interface Recording {
+  id: string;
+  timestamp: number;
+  fileName: string;
+  transcription: string;
+  duration: number;
+  status: string;
+}
 
-function loadSettings(): Settings {
-  try {
-    const raw = localStorage.getItem("settings");
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-  } catch {
-    /* fall through */
-  }
-  return DEFAULT_SETTINGS;
+interface CatalogModel {
+  name: string;
+  filename: string;
+  sizeMb: number;
+  description: string;
+}
+
+interface ModelsInfo {
+  catalog: CatalogModel[];
+  installed: string[];
+  activeModelPath: string;
+}
+
+interface DownloadEvent {
+  name: string;
+  bytesDownloaded: number;
+  totalBytes: number | null;
+  done: boolean;
+  error: string | null;
 }
 
 function App() {
@@ -46,17 +51,33 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [models, setModels] = useState<ModelsInfo | null>(null);
+  const [download, setDownload] = useState<DownloadEvent | null>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
 
-  // Push settings to the backend on startup and whenever they change.
-  useEffect(() => {
-    localStorage.setItem("settings", JSON.stringify(settings));
-    invoke("set_settings", { settings }).catch((e) => setError(String(e)));
-  }, [settings]);
+  async function refreshRecordings() {
+    try {
+      setRecordings(await invoke<Recording[]>("list_recordings"));
+    } catch {
+      /* storage may not be ready yet */
+    }
+  }
+
+  async function refreshModels() {
+    try {
+      setModels(await invoke<ModelsInfo>("models_info"));
+    } catch {
+      /* ditto */
+    }
+  }
 
   useEffect(() => {
+    invoke<Settings>("get_settings").then(setSettings);
+    refreshRecordings();
+    refreshModels();
     const unlisteners = [
       listen<{ progress: number }>("transcribe-progress", (e) =>
         setProgress(e.payload.progress),
@@ -67,6 +88,15 @@ function App() {
       }),
       listen<{ text: string }>("dictation-result", (e) => setText(e.payload.text)),
       listen<{ text: string }>("dictation-error", (e) => setError(e.payload.text)),
+      listen("recordings-changed", () => refreshRecordings()),
+      listen<Settings>("settings-changed", (e) => setSettings(e.payload)),
+      listen<DownloadEvent>("model-download", (e) => {
+        setDownload(e.payload.done ? null : e.payload);
+        if (e.payload.done) {
+          if (e.payload.error) setError(e.payload.error);
+          refreshModels();
+        }
+      }),
     ];
     return () => {
       unlisteners.forEach((u) => u.then((f) => f()));
@@ -83,7 +113,10 @@ function App() {
   }, [status]);
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
-    setSettings((s) => ({ ...s, [key]: value }));
+    if (!settings) return;
+    const next = { ...settings, [key]: value };
+    setSettings(next);
+    invoke("set_settings", { settings: next }).catch((e) => setError(String(e)));
   }
 
   async function toggleRecording() {
@@ -93,13 +126,10 @@ function App() {
         await invoke("start_recording");
       } else if (status === "recording") {
         setProgress(0);
-        // From the UI the paste target loses focus when clicking, so give
-        // the tester 2s to refocus; the hotkey flow pastes immediately.
         const result = await invoke<string>("stop_and_transcribe", {
-          pasteDelayMs: settings.paste ? 2000 : 0,
+          pasteDelayMs: settings?.paste ? 2000 : 0,
         });
         setText(result);
-        setStatus("idle");
       }
     } catch (e) {
       setError(String(e));
@@ -107,23 +137,24 @@ function App() {
     }
   }
 
-  async function cancel() {
-    await invoke("cancel_recording");
-  }
+  const activeModelName = models?.activeModelPath.split("/").pop() ?? "";
 
   return (
     <main className="container">
       <h1>ItalianSuperWhisper</h1>
-      <p className="hint">
-        Scorciatoia globale: <code>{settings.hotkey}</code> — tienila premuta
-        per dettare, o tocco singolo per avviare/fermare.
-      </p>
+      {settings && (
+        <p className="hint">
+          Scorciatoia globale: <code>{settings.hotkey}</code> — tienila premuta
+          per dettare, o tocco singolo per avviare/fermare. Modello attivo:{" "}
+          <code>{activeModelName}</code>
+        </p>
+      )}
 
       <div className="controls">
         <button
           className={status === "recording" ? "record recording" : "record"}
           onClick={toggleRecording}
-          disabled={status === "transcribing"}
+          disabled={status === "transcribing" || !settings}
         >
           {status === "idle" && "● Registra"}
           {status === "recording" && `■ Ferma (${elapsed.toFixed(1)}s)`}
@@ -131,75 +162,59 @@ function App() {
             `Trascrivo… ${Math.round(progress * 100)}%`}
         </button>
         {status === "recording" && (
-          <button className="cancel" onClick={cancel}>
+          <button className="cancel" onClick={() => invoke("cancel_recording")}>
             Annulla
           </button>
         )}
       </div>
 
-      <div className="options">
-        <label>
-          Lingua{" "}
-          <select
-            value={settings.language}
-            onChange={(e) => update("language", e.target.value)}
-          >
-            <option value="it">Italiano</option>
-            <option value="en">English</option>
-            <option value="auto">Auto</option>
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={settings.applyItalianCorrections}
-            onChange={(e) => update("applyItalianCorrections", e.target.checked)}
-          />{" "}
-          Correzioni italiane
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={settings.paste}
-            onChange={(e) => update("paste", e.target.checked)}
-          />{" "}
-          Incolla nell'app attiva
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={settings.holdToRecord}
-            onChange={(e) => update("holdToRecord", e.target.checked)}
-          />{" "}
-          Tieni premuto per registrare
-        </label>
-        <label>
-          Scorciatoia{" "}
-          <input
-            className="hotkey"
-            value={settings.hotkey}
-            onChange={(e) => update("hotkey", e.target.value)}
-          />
-        </label>
-      </div>
-
-      <details className="paths">
-        <summary>Percorsi modello (dev)</summary>
-        <label>
-          Modello whisper
-          <input
-            value={settings.modelPath}
-            onChange={(e) => update("modelPath", e.target.value)}
-          />
-        </label>
-        <label>
-          Modello VAD
-          <input
-            value={settings.vadPath}
-            onChange={(e) => update("vadPath", e.target.value)}
-          />
-        </label>
-      </details>
+      {settings && (
+        <div className="options">
+          <label>
+            Lingua{" "}
+            <select
+              value={settings.language}
+              onChange={(e) => update("language", e.target.value)}
+            >
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+              <option value="auto">Auto</option>
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.applyItalianCorrections}
+              onChange={(e) => update("applyItalianCorrections", e.target.checked)}
+            />{" "}
+            Correzioni italiane
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.paste}
+              onChange={(e) => update("paste", e.target.checked)}
+            />{" "}
+            Incolla nell'app attiva
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.holdToRecord}
+              onChange={(e) => update("holdToRecord", e.target.checked)}
+            />{" "}
+            Tieni premuto per registrare
+          </label>
+          <label>
+            Scorciatoia{" "}
+            <input
+              className="hotkey"
+              value={settings.hotkey}
+              onChange={(e) => update("hotkey", e.target.value)}
+            />
+          </label>
+        </div>
+      )}
 
       {error && <p className="error">{error}</p>}
 
@@ -209,6 +224,106 @@ function App() {
         readOnly
         placeholder="La trascrizione apparirà qui…"
       />
+
+      <details className="section" open>
+        <summary>Storico ({recordings.length})</summary>
+        <ul className="history">
+          {recordings.map((r) => (
+            <li key={r.id}>
+              <div className="history-text">{r.transcription || "(vuota)"}</div>
+              <div className="history-meta">
+                {new Date(r.timestamp).toLocaleString("it-IT")} ·{" "}
+                {r.duration.toFixed(1)}s
+                <button
+                  onClick={() => navigator.clipboard.writeText(r.transcription)}
+                >
+                  Copia
+                </button>
+                <button
+                  onClick={async () => {
+                    await invoke("delete_recording", { id: r.id });
+                    refreshRecordings();
+                  }}
+                >
+                  Elimina
+                </button>
+              </div>
+            </li>
+          ))}
+          {recordings.length === 0 && <li className="empty">Nessuna dettatura.</li>}
+        </ul>
+      </details>
+
+      {models && (
+        <details className="section">
+          <summary>Modelli</summary>
+          <ul className="models">
+            {models.catalog.map((m) => {
+              const installed = models.installed.includes(m.filename);
+              const active = models.activeModelPath.endsWith(m.filename);
+              const downloading = download?.name === m.name;
+              return (
+                <li key={m.name}>
+                  <div>
+                    <strong>{m.name}</strong> — {m.sizeMb} MB
+                    {active && <span className="badge">attivo</span>}
+                    {installed && !active && (
+                      <span className="badge installed">installato</span>
+                    )}
+                  </div>
+                  <div className="model-desc">{m.description}</div>
+                  {downloading && download && (
+                    <progress
+                      value={download.bytesDownloaded}
+                      max={download.totalBytes ?? undefined}
+                    />
+                  )}
+                  <div className="model-actions">
+                    {!installed && !downloading && (
+                      <button
+                        onClick={() =>
+                          invoke("download_model", { name: m.name }).catch((e) =>
+                            setError(String(e)),
+                          )
+                        }
+                      >
+                        Scarica
+                      </button>
+                    )}
+                    {downloading && (
+                      <button onClick={() => invoke("cancel_model_download")}>
+                        Annulla download
+                      </button>
+                    )}
+                    {installed && !active && (
+                      <>
+                        <button
+                          onClick={() =>
+                            invoke("select_model", { name: m.filename })
+                              .then(refreshModels)
+                              .catch((e) => setError(String(e)))
+                          }
+                        >
+                          Usa
+                        </button>
+                        <button
+                          onClick={() =>
+                            invoke("delete_model", { name: m.filename })
+                              .then(refreshModels)
+                              .catch((e) => setError(String(e)))
+                          }
+                        >
+                          Elimina
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
     </main>
   );
 }

@@ -30,6 +30,7 @@ const CHUNK_SIZE: usize = 64 * 1024;
 
 /// One downloadable model, mirroring `SettingsDownloadableModel` in Swift.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CatalogModel {
     /// Human-readable name shown in the UI (e.g. "Turbo V3 large").
     pub name: &'static str,

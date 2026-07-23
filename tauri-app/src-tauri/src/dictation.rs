@@ -121,6 +121,21 @@ pub fn transcribe_pipeline(
         text = italian_corrector::correct(&text);
     }
 
+    // Persist the dictation BEFORE pasting — the paste must never be the only
+    // surviving copy (the invariant the Swift app defends with its awaited
+    // save). A failed save is surfaced but doesn't block the paste: at that
+    // point the paste is the user's only way to keep their words.
+    if !text.is_empty() {
+        if let Err(e) = persist_recording(app, &samples, &text) {
+            let _ = app.emit(
+                "dictation-error",
+                ResultPayload {
+                    text: format!("salvataggio non riuscito: {e}"),
+                },
+            );
+        }
+    }
+
     emit_progress(app, 1.0);
     let _ = app.emit("dictation-result", ResultPayload { text: text.clone() });
 
@@ -151,6 +166,55 @@ pub fn transcribe_pipeline(
     }
 
     Ok(text)
+}
+
+/// Writes the 16kHz mono WAV alongside the DB row, mirroring the Swift
+/// recordings/ directory convention, and notifies the UI.
+fn persist_recording(app: &AppHandle, samples: &[f32], text: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let storage = state.storage.lock().unwrap();
+    let Some(storage) = storage.as_ref() else {
+        return Err("storage not initialized".into());
+    };
+
+    let id = uuid::Uuid::new_v4();
+    let file_name = format!("{id}.wav");
+    let wav_path = storage.paths.recordings_dir.join(&file_name);
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: audio_capture::WHISPER_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&wav_path, spec).map_err(|e| e.to_string())?;
+    for &s in samples {
+        writer
+            .write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+            .map_err(|e| e.to_string())?;
+    }
+    writer.finalize().map_err(|e| e.to_string())?;
+
+    let recording = recordings_store::Recording {
+        id,
+        timestamp: recordings_store::now_millis(),
+        file_name,
+        transcription: text.to_string(),
+        duration: samples.len() as f64 / audio_capture::WHISPER_SAMPLE_RATE as f64,
+        status: recordings_store::RecordingStatus::Completed,
+        progress: 1.0,
+        source_file_url: None,
+        // Populated by the reformulation layer once it lands: raw is stored
+        // only when it differs from the final text.
+        raw_transcription: None,
+        is_regeneration: false,
+    };
+    storage
+        .store
+        .add_recording(&recording)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("recordings-changed", ());
+    Ok(())
 }
 
 /// Stops the active recorder (if any) and runs the pipeline on a blocking

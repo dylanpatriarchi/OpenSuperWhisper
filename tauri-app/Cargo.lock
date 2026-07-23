@@ -4279,14 +4279,18 @@ name = "tauri-app"
 version = "0.1.0"
 dependencies = [
  "audio-capture",
+ "hound",
  "italian-corrector",
+ "model-manager",
  "paste-sim",
+ "recordings-store",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
+ "uuid",
  "whisper-engine",
 ]
 

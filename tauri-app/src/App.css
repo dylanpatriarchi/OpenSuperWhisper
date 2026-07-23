@@ -123,3 +123,36 @@ button.cancel {
     border-color: #444;
   }
 }
+
+.hint {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0;
+}
+
+.hint code {
+  background: rgba(127, 127, 127, 0.15);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+input.hotkey {
+  font-size: 0.85rem;
+  padding: 0.25em 0.5em;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  width: 11rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hint {
+    color: #999;
+  }
+
+  input.hotkey {
+    background-color: #171717;
+    color: #f0f0f0;
+    border-color: #444;
+  }
+}

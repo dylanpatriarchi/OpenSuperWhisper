@@ -10,28 +10,66 @@ const DEFAULT_VAD =
 
 type Status = "idle" | "recording" | "transcribing";
 
+interface Settings {
+  modelPath: string;
+  vadPath: string;
+  language: string;
+  applyItalianCorrections: boolean;
+  paste: boolean;
+  holdToRecord: boolean;
+  hotkey: string;
+}
+
+const DEFAULT_SETTINGS: Settings = {
+  modelPath: DEFAULT_MODEL,
+  vadPath: DEFAULT_VAD,
+  language: "it",
+  applyItalianCorrections: true,
+  paste: true,
+  holdToRecord: true,
+  hotkey: "alt+Backquote",
+};
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem("settings");
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    /* fall through */
+  }
+  return DEFAULT_SETTINGS;
+}
+
 function App() {
   const [status, setStatus] = useState<Status>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-
-  const [modelPath, setModelPath] = useState(DEFAULT_MODEL);
-  const [vadPath, setVadPath] = useState(DEFAULT_VAD);
-  const [language, setLanguage] = useState("it");
-  const [correctItalian, setCorrectItalian] = useState(true);
-  const [paste, setPaste] = useState(false);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
   const statusRef = useRef(status);
   statusRef.current = status;
 
+  // Push settings to the backend on startup and whenever they change.
   useEffect(() => {
-    const unlisten = listen<{ progress: number }>(
-      "transcribe-progress",
-      (e) => setProgress(e.payload.progress),
-    );
+    localStorage.setItem("settings", JSON.stringify(settings));
+    invoke("set_settings", { settings }).catch((e) => setError(String(e)));
+  }, [settings]);
+
+  useEffect(() => {
+    const unlisteners = [
+      listen<{ progress: number }>("transcribe-progress", (e) =>
+        setProgress(e.payload.progress),
+      ),
+      listen<{ state: Status }>("dictation-state", (e) => {
+        setStatus(e.payload.state);
+        if (e.payload.state === "recording") setElapsed(0);
+      }),
+      listen<{ text: string }>("dictation-result", (e) => setText(e.payload.text)),
+      listen<{ text: string }>("dictation-error", (e) => setError(e.payload.text)),
+    ];
     return () => {
-      unlisten.then((f) => f());
+      unlisteners.forEach((u) => u.then((f) => f()));
     };
   }, []);
 
@@ -44,23 +82,21 @@ function App() {
     return () => clearInterval(timer);
   }, [status]);
 
+  function update<K extends keyof Settings>(key: K, value: Settings[K]) {
+    setSettings((s) => ({ ...s, [key]: value }));
+  }
+
   async function toggleRecording() {
     setError("");
     try {
       if (status === "idle") {
         await invoke("start_recording");
-        setElapsed(0);
-        setStatus("recording");
       } else if (status === "recording") {
-        setStatus("transcribing");
         setProgress(0);
+        // From the UI the paste target loses focus when clicking, so give
+        // the tester 2s to refocus; the hotkey flow pastes immediately.
         const result = await invoke<string>("stop_and_transcribe", {
-          modelPath,
-          vadPath,
-          language,
-          applyItalianCorrections: correctItalian,
-          paste,
-          pasteDelayMs: paste ? 2000 : 0,
+          pasteDelayMs: settings.paste ? 2000 : 0,
         });
         setText(result);
         setStatus("idle");
@@ -73,12 +109,15 @@ function App() {
 
   async function cancel() {
     await invoke("cancel_recording");
-    setStatus("idle");
   }
 
   return (
     <main className="container">
       <h1>ItalianSuperWhisper</h1>
+      <p className="hint">
+        Scorciatoia globale: <code>{settings.hotkey}</code> — tienila premuta
+        per dettare, o tocco singolo per avviare/fermare.
+      </p>
 
       <div className="controls">
         <button
@@ -101,7 +140,10 @@ function App() {
       <div className="options">
         <label>
           Lingua{" "}
-          <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+          <select
+            value={settings.language}
+            onChange={(e) => update("language", e.target.value)}
+          >
             <option value="it">Italiano</option>
             <option value="en">English</option>
             <option value="auto">Auto</option>
@@ -110,18 +152,34 @@ function App() {
         <label>
           <input
             type="checkbox"
-            checked={correctItalian}
-            onChange={(e) => setCorrectItalian(e.target.checked)}
+            checked={settings.applyItalianCorrections}
+            onChange={(e) => update("applyItalianCorrections", e.target.checked)}
           />{" "}
           Correzioni italiane
         </label>
         <label>
           <input
             type="checkbox"
-            checked={paste}
-            onChange={(e) => setPaste(e.target.checked)}
+            checked={settings.paste}
+            onChange={(e) => update("paste", e.target.checked)}
           />{" "}
-          Incolla dopo 2s (metti a fuoco l'app di destinazione)
+          Incolla nell'app attiva
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={settings.holdToRecord}
+            onChange={(e) => update("holdToRecord", e.target.checked)}
+          />{" "}
+          Tieni premuto per registrare
+        </label>
+        <label>
+          Scorciatoia{" "}
+          <input
+            className="hotkey"
+            value={settings.hotkey}
+            onChange={(e) => update("hotkey", e.target.value)}
+          />
         </label>
       </div>
 
@@ -129,11 +187,17 @@ function App() {
         <summary>Percorsi modello (dev)</summary>
         <label>
           Modello whisper
-          <input value={modelPath} onChange={(e) => setModelPath(e.target.value)} />
+          <input
+            value={settings.modelPath}
+            onChange={(e) => update("modelPath", e.target.value)}
+          />
         </label>
         <label>
           Modello VAD
-          <input value={vadPath} onChange={(e) => setVadPath(e.target.value)} />
+          <input
+            value={settings.vadPath}
+            onChange={(e) => update("vadPath", e.target.value)}
+          />
         </label>
       </details>
 

@@ -1,11 +1,21 @@
+# How whisper.cpp is built
 
-TBD
+The app links whisper.cpp via the `libwhisper/whisper.cpp` git submodule.
+You do **not** build it by hand — `run.sh` configures it as an Xcode-generated
+CMake project before building the app:
 
-
-build .a static lib, move lib and headers to project. Include c++ std and other libs to the project linking.
-
-```curl
-cd ../.. && rm -rf build && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_FLAGS="-fvisibility=hidden" -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF ..
-
-make -j$(sysctl -n hw.ncpu)
+```shell
+cmake -G Xcode -B libwhisper/build -S libwhisper
 ```
+
+`libwhisper/CMakeLists.txt` pulls in the submodule and exposes the `whisper`
+target (with the Metal and GGML backends) to the Xcode project. So the only
+thing you have to do yourself is initialise the submodule:
+
+```shell
+git submodule update --init --recursive
+```
+
+Skip it and `libwhisper/whisper.cpp` is empty, so the link fails with
+`library 'ggml-metal' not found`. See the README's "Running it" section for
+the full build flow.

@@ -185,11 +185,26 @@ Applied in [#1](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/1):
 - Event taps no longer leak a mach port on every shortcut change.
 - `run.sh` no longer reports success when the build actually failed.
 
-Applied in [#5](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/5):
+Applied in [#5](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/5), alongside the
+reformulation feature:
 
+- **Cancelling actually cancels.** The decoding task was not held anywhere, so pressing Esc
+  hid the indicator but let the work run to completion — and paste its result into whatever
+  you were doing next. Reformulation stretched that window to seconds. The task is now held,
+  cancelled, and checked before anything is persisted or pasted.
+- **A failed database write no longer loses the raw dictation.** The save was
+  fire-and-forget and swallowed errors into a log, while the text was pasted regardless. It
+  is now awaited; the audio is on disk before anything is pasted.
 - **A missing microphone is reported before a loading model.** Both conditions block
   recording, but only one resolves itself: someone with no input device was told
   "Loading model..." and left waiting for something that would never help.
+
+Applied in [#6](https://github.com/dylanpatriarchi/ItalianSuperWhisper/pull/6):
+
+- **The release scripts work again.** `notarize_app.sh` still built a Rust crate from a
+  directory removed with the CJK autocorrect, and `make_release.sh` published to the
+  upstream repo. Both are repointed here; the original author's Team ID and keychain
+  profile are now environment variables that fail loudly if unset.
 
 ## Roadmap
 
@@ -209,7 +224,9 @@ Inherited from upstream:
 
 ## Contributing
 
-Pull requests and issues are welcome.
+Pull requests and issues are welcome. If you are picking the project up,
+[`docs/HANDOFF.md`](docs/HANDOFF.md) is the fastest way in: what landed, how
+the reformulation is wired, and what is left to do.
 
 ## License
 

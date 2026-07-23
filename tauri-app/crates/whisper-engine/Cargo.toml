@@ -5,6 +5,12 @@ edition.workspace = true
 
 [dependencies]
 thiserror = "2"
+whisper-rs = "0.16"
+
+[[example]]
+name = "transcribe"
+path = "examples/transcribe.rs"
 
 [dev-dependencies]
 tempfile = "3"
+hound = "3"

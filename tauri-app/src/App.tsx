@@ -55,6 +55,7 @@ function App() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [download, setDownload] = useState<DownloadEvent | null>(null);
+  const [axTrusted, setAxTrusted] = useState(true);
   const statusRef = useRef(status);
   statusRef.current = status;
 
@@ -76,6 +77,7 @@ function App() {
 
   useEffect(() => {
     invoke<Settings>("get_settings").then(setSettings);
+    invoke<boolean>("accessibility_status").then(setAxTrusted);
     refreshRecordings();
     refreshModels();
     const unlisteners = [
@@ -214,6 +216,21 @@ function App() {
             />
           </label>
         </div>
+      )}
+
+      {!axTrusted && settings?.paste && (
+        <p className="warning">
+          Per incollare nelle altre app serve il permesso{" "}
+          <strong>Accessibilità</strong>.{" "}
+          <button
+            onClick={async () => {
+              const ok = await invoke<boolean>("request_accessibility");
+              setAxTrusted(ok);
+            }}
+          >
+            Concedi
+          </button>
+        </p>
       )}
 
       {error && <p className="error">{error}</p>}

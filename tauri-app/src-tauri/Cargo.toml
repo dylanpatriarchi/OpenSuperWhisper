@@ -32,3 +32,6 @@ model-manager = { path = "../crates/model-manager" }
 hound = "3"
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+

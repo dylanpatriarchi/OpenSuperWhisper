@@ -19,6 +19,7 @@ use uuid::Uuid;
 use whisper_engine::transcribe::WhisperEngine;
 
 mod dictation;
+mod permissions;
 mod storage;
 use dictation::{emit_state, transcribe_pipeline, DictationSettings, HotkeyMachine};
 use storage::Storage;
@@ -291,6 +292,21 @@ fn select_model(
 }
 
 // ---------------------------------------------------------------------------
+// Permissions
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn accessibility_status() -> bool {
+    permissions::accessibility_trusted()
+}
+
+/// Triggers the system Accessibility prompt (macOS); returns current trust.
+#[tauri::command]
+fn request_accessibility() -> bool {
+    permissions::request_accessibility()
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
@@ -391,7 +407,9 @@ pub fn run() {
             download_model,
             cancel_model_download,
             delete_model,
-            select_model
+            select_model,
+            accessibility_status,
+            request_accessibility
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

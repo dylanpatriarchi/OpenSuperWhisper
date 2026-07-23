@@ -239,3 +239,12 @@ input.hotkey {
 .models progress {
   width: 100%;
 }
+
+.warning {
+  background: rgba(230, 160, 30, 0.15);
+  border: 1px solid rgba(230, 160, 30, 0.4);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  margin: 0;
+}

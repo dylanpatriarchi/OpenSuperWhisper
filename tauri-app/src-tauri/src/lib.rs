@@ -39,6 +39,7 @@ pub(crate) struct AppState {
     pub hotkey_machine: HotkeyMachine,
     pub storage: Mutex<Option<Storage>>,
     pub download_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    pub reform_engine: Mutex<Option<(String, reformulation::engine::ReformulationEngine)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +293,108 @@ fn select_model(
 }
 
 // ---------------------------------------------------------------------------
+// Reformulation model
+// ---------------------------------------------------------------------------
+
+/// Recommended Italian-capable instruct model in GGUF (see
+/// docs/TAURI_REWRITE.md — the runtime replacement for the MLX
+/// gemma model the Swift app used). ~1.7 GB.
+const REFORMULATION_MODEL_URL: &str =
+    "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf?download=true";
+const REFORMULATION_MODEL_FILE: &str = "gemma-2-2b-it-Q4_K_M.gguf";
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ReformulationInfo {
+    installed: bool,
+    model_file: String,
+    size_mb: u32,
+}
+
+#[tauri::command]
+fn reformulation_info(state: State<'_, AppState>) -> Result<ReformulationInfo, String> {
+    let storage = state.storage.lock().unwrap();
+    let storage = storage.as_ref().ok_or("storage not initialized")?;
+    let path = storage.paths.llm_models_dir.join(REFORMULATION_MODEL_FILE);
+    Ok(ReformulationInfo {
+        installed: path.is_file(),
+        model_file: REFORMULATION_MODEL_FILE.into(),
+        size_mb: 1710,
+    })
+}
+
+/// Downloads the recommended GGUF and, on success, points the settings at it.
+#[tauri::command]
+fn download_reformulation_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let (models, dest) = {
+        let storage = state.storage.lock().unwrap();
+        let storage = storage.as_ref().ok_or("storage not initialized")?;
+        (
+            storage.models.clone(),
+            storage.paths.llm_models_dir.join(REFORMULATION_MODEL_FILE),
+        )
+    };
+    let mut cancel_slot = state.download_cancel.lock().unwrap();
+    if cancel_slot.is_some() {
+        return Err("another download is already running".into());
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    *cancel_slot = Some(cancel.clone());
+    drop(cancel_slot);
+
+    std::thread::spawn(move || {
+        let progress_app = app.clone();
+        let mut on_progress = |p: DownloadProgress| {
+            let _ = progress_app.emit(
+                "model-download",
+                DownloadEvent {
+                    name: "reformulation".into(),
+                    bytes_downloaded: p.bytes_downloaded,
+                    total_bytes: p.total_bytes,
+                    done: false,
+                    error: None,
+                },
+            );
+        };
+        let result = models.download_url(
+            REFORMULATION_MODEL_URL,
+            &dest,
+            cancel,
+            &mut on_progress,
+            model_manager::Validation::Gguf,
+        );
+        let error = result.as_ref().err().map(|e| e.to_string());
+
+        if result.is_ok() {
+            let state = app.state::<AppState>();
+            let settings = {
+                let mut settings = state.settings.lock().unwrap();
+                settings.reformulation_model_path = dest.to_string_lossy().into_owned();
+                settings.clone()
+            };
+            if let Some(storage) = state.storage.lock().unwrap().as_ref() {
+                storage::save_settings(&storage.paths.settings_path, &settings);
+            }
+            let _ = app.emit("settings-changed", settings);
+        }
+
+        let _ = app.emit(
+            "model-download",
+            DownloadEvent {
+                name: "reformulation".into(),
+                bytes_downloaded: 0,
+                total_bytes: None,
+                done: true,
+                error,
+            },
+        );
+        let state = app.state::<AppState>();
+        state.download_cancel.lock().unwrap().take();
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Permissions
 // ---------------------------------------------------------------------------
 
@@ -427,6 +530,8 @@ pub fn run() {
             cancel_model_download,
             delete_model,
             select_model,
+            reformulation_info,
+            download_reformulation_model,
             accessibility_status,
             request_accessibility
         ])

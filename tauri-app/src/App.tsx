@@ -13,6 +13,8 @@ interface Settings {
   paste: boolean;
   holdToRecord: boolean;
   hotkey: string;
+  reformulationEnabled: boolean;
+  reformulationModelPath: string;
 }
 
 interface Recording {
@@ -37,6 +39,12 @@ interface ModelsInfo {
   activeModelPath: string;
 }
 
+interface ReformulationInfo {
+  installed: boolean;
+  modelFile: string;
+  sizeMb: number;
+}
+
 interface DownloadEvent {
   name: string;
   bytesDownloaded: number;
@@ -56,6 +64,7 @@ function App() {
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [download, setDownload] = useState<DownloadEvent | null>(null);
   const [axTrusted, setAxTrusted] = useState(true);
+  const [reform, setReform] = useState<ReformulationInfo | null>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
 
@@ -78,6 +87,7 @@ function App() {
   useEffect(() => {
     invoke<Settings>("get_settings").then(setSettings);
     invoke<boolean>("accessibility_status").then(setAxTrusted);
+    invoke<ReformulationInfo>("reformulation_info").then(setReform).catch(() => {});
     refreshRecordings();
     refreshModels();
     const unlisteners = [
@@ -97,6 +107,9 @@ function App() {
         if (e.payload.done) {
           if (e.payload.error) setError(e.payload.error);
           refreshModels();
+          invoke<ReformulationInfo>("reformulation_info")
+            .then(setReform)
+            .catch(() => {});
         }
       }),
     ];
@@ -270,6 +283,50 @@ function App() {
           {recordings.length === 0 && <li className="empty">Nessuna dettatura.</li>}
         </ul>
       </details>
+
+      {reform && settings && (
+        <details className="section">
+          <summary>Riformulazione (LLM locale)</summary>
+          <p className="model-desc">
+            Rimuove le autocorrezioni parlate ("alle 10, ah no, alle 10 e
+            mezza") con un modello locale ({reform.modelFile},{" "}
+            {Math.round(reform.sizeMb / 100) / 10} GB). La dettatura originale
+            viene sempre conservata nello storico.
+          </p>
+          {!reform.installed && download?.name !== "reformulation" && (
+            <button
+              onClick={() =>
+                invoke("download_reformulation_model").catch((e) =>
+                  setError(String(e)),
+                )
+              }
+            >
+              Scarica il modello
+            </button>
+          )}
+          {download?.name === "reformulation" && (
+            <>
+              <progress
+                value={download.bytesDownloaded}
+                max={download.totalBytes ?? undefined}
+              />
+              <button onClick={() => invoke("cancel_model_download")}>
+                Annulla download
+              </button>
+            </>
+          )}
+          {reform.installed && (
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.reformulationEnabled}
+                onChange={(e) => update("reformulationEnabled", e.target.checked)}
+              />{" "}
+              Riformula le dettature
+            </label>
+          )}
+        </details>
+      )}
 
       {models && (
         <details className="section">

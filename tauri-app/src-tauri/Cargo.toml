@@ -29,6 +29,7 @@ paste-sim = { path = "../crates/paste-sim" }
 italian-corrector = { path = "../crates/italian-corrector" }
 recordings-store = { path = "../crates/recordings-store" }
 model-manager = { path = "../crates/model-manager" }
+reformulation = { path = "../crates/reformulation" }
 hound = "3"
 uuid = { version = "1", features = ["v4"] }
 

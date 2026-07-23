@@ -192,9 +192,8 @@ impl ReformulationEngine {
         let mut sampler = LlamaSampler::greedy();
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
-        let mut pos = tokens.len() as i32;
 
-        for _ in 0..MAX_TOKENS {
+        for pos in (tokens.len() as i32..).take(MAX_TOKENS as usize) {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             if self.model.is_eog_token(token) {
                 break;
@@ -209,7 +208,6 @@ impl ReformulationEngine {
             batch
                 .add(token, pos, &[0], true)
                 .map_err(|e| EngineError::Decode(e.to_string()))?;
-            pos += 1;
             ctx.decode(&mut batch)
                 .map_err(|e| EngineError::Decode(e.to_string()))?;
         }

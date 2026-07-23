@@ -90,6 +90,42 @@ pub fn catalog_model(name: &str) -> Option<&'static CatalogModel> {
         .find(|m| m.name == name || m.filename == name)
 }
 
+/// What a finished download must look like before it is renamed into
+/// place. `Ggml` is the whisper-model check ported from Swift; `Gguf` covers
+/// LLM models for the reformulation feature; `NoCheck` is for callers that
+/// validate on their own.
+#[derive(Debug, Clone, Copy)]
+pub enum Validation {
+    Ggml,
+    Gguf,
+    NoCheck,
+}
+
+impl Validation {
+    fn check(self, path: &Path) -> Result<()> {
+        match self {
+            Validation::Ggml => Ok(validate_downloaded_model(path)?),
+            Validation::Gguf => {
+                let size = fs::metadata(path)?.len();
+                if size < 1_048_576 {
+                    return Err(ModelManagerError::Validation(
+                        ModelValidationError::TooSmall(size),
+                    ));
+                }
+                let mut head = [0u8; 4];
+                File::open(path)?.read_exact(&mut head)?;
+                if &head != b"GGUF" {
+                    return Err(ModelManagerError::Validation(
+                        ModelValidationError::NotAGgmlFile,
+                    ));
+                }
+                Ok(())
+            }
+            Validation::NoCheck => Ok(()),
+        }
+    }
+}
+
 /// Progress of an in-flight download.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct DownloadProgress {
@@ -238,7 +274,7 @@ impl ModelManager {
             });
             return Ok(dest);
         }
-        self.download_url(model.url, &dest, cancel, &mut progress)
+        self.download_url(model.url, &dest, cancel, &mut progress, Validation::Ggml)
     }
 
     /// Lower-level download used by `download_model`; public so callers (and
@@ -249,6 +285,7 @@ impl ModelManager {
         dest: &Path,
         cancel: Arc<AtomicBool>,
         progress: &mut impl FnMut(DownloadProgress),
+        validation: Validation,
     ) -> Result<PathBuf> {
         let partial = partial_path(dest);
         let resume_offset = fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
@@ -271,7 +308,7 @@ impl ModelManager {
         if status.as_u16() == 416 {
             // Requested range not satisfiable: the partial already covers the
             // full file. Validate and promote it.
-            return finalize_download(&partial, dest);
+            return finalize_download(&partial, dest, validation);
         }
         if !status.is_success() {
             // Keep the partial: a transient server error should not throw away
@@ -322,17 +359,17 @@ impl ModelManager {
         file.flush()?;
         drop(file);
 
-        finalize_download(&partial, dest)
+        finalize_download(&partial, dest, validation)
     }
 }
 
 /// Validates the completed `.partial` and renames it into place. On validation
 /// failure the partial is deleted — this is the guard against phantom
 /// "installed" models (see the Swift comment in `WhisperModelManager`).
-fn finalize_download(partial: &Path, dest: &Path) -> Result<PathBuf> {
-    if let Err(err) = validate_downloaded_model(partial) {
+fn finalize_download(partial: &Path, dest: &Path, validation: Validation) -> Result<PathBuf> {
+    if let Err(err) = validation.check(partial) {
         let _ = fs::remove_file(partial);
-        return Err(err.into());
+        return Err(err);
     }
     fs::rename(partial, dest)?;
     Ok(dest.to_path_buf())
@@ -449,7 +486,7 @@ mod tests {
         let partial = partial_path(&dest);
         fs::write(&partial, b"<html><body>502 Bad Gateway</body></html>").unwrap();
 
-        let err = finalize_download(&partial, &dest).unwrap_err();
+        let err = finalize_download(&partial, &dest, Validation::Ggml).unwrap_err();
         assert!(matches!(err, ModelManagerError::Validation(_)));
         assert!(!partial.exists(), "failed partial must be deleted");
         assert!(!dest.exists(), "bad download must never reach the models dir");
@@ -463,7 +500,7 @@ mod tests {
         let partial = partial_path(&dest);
         fs::write(&partial, vec![0u8; 2_000_000]).unwrap();
 
-        let err = finalize_download(&partial, &dest).unwrap_err();
+        let err = finalize_download(&partial, &dest, Validation::Ggml).unwrap_err();
         assert!(matches!(err, ModelManagerError::Validation(_)));
         assert!(!partial.exists());
         assert!(!dest.exists());
@@ -476,7 +513,7 @@ mod tests {
         let partial = partial_path(&dest);
         write_fake_valid_model(&partial);
 
-        let installed = finalize_download(&partial, &dest).unwrap();
+        let installed = finalize_download(&partial, &dest, Validation::Ggml).unwrap();
         assert_eq!(installed, dest);
         assert!(!partial.exists());
         assert!(mgr.is_model_downloaded("ggml-large-v3-turbo.bin"));
@@ -571,6 +608,7 @@ mod tests {
                         assert!(p.bytes_downloaded <= total);
                     }
                 },
+                Validation::Ggml,
             )
             .unwrap();
         assert!(calls > 1, "expected streaming progress callbacks");

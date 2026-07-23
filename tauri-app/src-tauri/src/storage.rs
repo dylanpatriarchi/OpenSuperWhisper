@@ -16,6 +16,9 @@ use crate::dictation::DictationSettings;
 pub struct Paths {
     pub recordings_dir: PathBuf,
     pub settings_path: PathBuf,
+    /// GGUF instruct models for the reformulation feature live apart from
+    /// the whisper models.
+    pub llm_models_dir: PathBuf,
 }
 
 pub struct Storage {
@@ -32,6 +35,8 @@ pub fn init(app: &AppHandle) -> Result<(Storage, DictationSettings), String> {
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
     let models_dir = data_dir.join("whisper-models");
+    let llm_models_dir = data_dir.join("llm-models");
+    std::fs::create_dir_all(&llm_models_dir).map_err(|e| e.to_string())?;
     let recordings_dir = data_dir.join("recordings");
     let db_path = data_dir.join("recordings.sqlite");
     let settings_path = data_dir.join("settings.json");
@@ -63,6 +68,7 @@ pub fn init(app: &AppHandle) -> Result<(Storage, DictationSettings), String> {
         paths: Paths {
             recordings_dir,
             settings_path,
+            llm_models_dir,
         },
         store: Arc::new(store),
         models: Arc::new(models),

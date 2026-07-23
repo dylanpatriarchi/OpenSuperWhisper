@@ -4341,6 +4341,7 @@ dependencies = [
  "model-manager",
  "paste-sim",
  "recordings-store",
+ "reformulation",
  "serde",
  "serde_json",
  "tauri",

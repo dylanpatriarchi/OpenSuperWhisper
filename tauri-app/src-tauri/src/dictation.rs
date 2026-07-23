@@ -27,6 +27,13 @@ pub struct DictationSettings {
     pub paste: bool,
     pub hold_to_record: bool,
     pub hotkey: String,
+    /// Off by default, like the Swift app: the LLM rewrite must be opted
+    /// into. `serde(default)` keeps settings.json files from before these
+    /// fields loading cleanly.
+    #[serde(default)]
+    pub reformulation_enabled: bool,
+    #[serde(default)]
+    pub reformulation_model_path: String,
 }
 
 impl Default for DictationSettings {
@@ -41,6 +48,8 @@ impl Default for DictationSettings {
             // The Swift default is Option+` (backtick); "Backquote" is the
             // W3C code name the shortcut parser expects.
             hotkey: "alt+Backquote".into(),
+            reformulation_enabled: false,
+            reformulation_model_path: String::new(),
         }
     }
 }
@@ -150,12 +159,47 @@ pub fn transcribe_pipeline(
         text = italian_corrector::correct(&text);
     }
 
+    // Optional LLM rewrite. reformulate_sanitized enforces the safety
+    // contract (empty/overlong/failed responses fall back to the input);
+    // a failed engine load surfaces once and dictation continues raw.
+    let mut raw_for_store: Option<String> = None;
+    if settings.reformulation_enabled
+        && !settings.reformulation_model_path.is_empty()
+        && !text.is_empty()
+    {
+        let path = settings.reformulation_model_path.clone();
+        let mut cache = state.reform_engine.lock().unwrap();
+        let stale = cache.as_ref().map(|(p, _)| p != &path).unwrap_or(true);
+        if stale {
+            match reformulation::engine::ReformulationEngine::load(Path::new(&path)) {
+                Ok(engine) => *cache = Some((path, engine)),
+                Err(e) => {
+                    *cache = None;
+                    let _ = app.emit(
+                        "dictation-error",
+                        ResultPayload {
+                            text: format!("riformulazione saltata: {e}"),
+                        },
+                    );
+                }
+            }
+        }
+        if let Some((_, engine)) = cache.as_mut() {
+            let rewritten = engine.reformulate_sanitized(&text);
+            if rewritten != text {
+                // Store raw only when it differs from the final text,
+                // mirroring `rawTranscription: text == rawText ? nil : rawText`.
+                raw_for_store = Some(std::mem::replace(&mut text, rewritten));
+            }
+        }
+    }
+
     // Persist the dictation BEFORE pasting — the paste must never be the only
     // surviving copy (the invariant the Swift app defends with its awaited
     // save). A failed save is surfaced but doesn't block the paste: at that
     // point the paste is the user's only way to keep their words.
     if !text.is_empty() {
-        if let Err(e) = persist_recording(app, &samples, &text) {
+        if let Err(e) = persist_recording(app, &samples, &text, raw_for_store.as_deref()) {
             let _ = app.emit(
                 "dictation-error",
                 ResultPayload {
@@ -199,7 +243,12 @@ pub fn transcribe_pipeline(
 
 /// Writes the 16kHz mono WAV alongside the DB row, mirroring the Swift
 /// recordings/ directory convention, and notifies the UI.
-fn persist_recording(app: &AppHandle, samples: &[f32], text: &str) -> Result<(), String> {
+fn persist_recording(
+    app: &AppHandle,
+    samples: &[f32],
+    text: &str,
+    raw_transcription: Option<&str>,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let storage = state.storage.lock().unwrap();
     let Some(storage) = storage.as_ref() else {
@@ -233,9 +282,7 @@ fn persist_recording(app: &AppHandle, samples: &[f32], text: &str) -> Result<(),
         status: recordings_store::RecordingStatus::Completed,
         progress: 1.0,
         source_file_url: None,
-        // Populated by the reformulation layer once it lands: raw is stored
-        // only when it differs from the final text.
-        raw_transcription: None,
+        raw_transcription: raw_transcription.map(str::to_string),
         is_regeneration: false,
     };
     storage

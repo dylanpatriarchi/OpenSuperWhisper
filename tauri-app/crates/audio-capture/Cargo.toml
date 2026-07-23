@@ -1,0 +1,9 @@
+[package]
+name = "audio-capture"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+cpal = "0.18"
+rubato = "0.16"
+thiserror = "2"
